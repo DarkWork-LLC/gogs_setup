@@ -37,10 +37,10 @@ help:
 # Install dependencies
 install-deps:
 	@echo "Installing dependencies..."
-	@if ! command -v podman >/dev/null 2>&1; then \
+	if ! command -v podman >/dev/null 2>&1; then \
 		echo "Warning: podman not found, some features may be limited"; \
 	fi
-	@if ! command -v ansible-playbook >/dev/null 2>&1; then \
+	if ! command -v ansible-playbook >/dev/null 2>&1; then \
 		echo "Installing ansible..."; \
 		pip install ansible; \
 	fi
@@ -69,7 +69,7 @@ quick-build:
 # Clean (stop and remove container and volumes)
 clean:
 	@echo "Cleaning up Gogs container and volumes..."
-	@if command -v podman >/dev/null 2>&1; then \
+	if command -v podman >/dev/null 2>&1; then \
 		echo "Stopping Gogs container..."; \
 		podman stop gogs 2>/dev/null || true; \
 		echo "Removing Gogs container..."; \
@@ -152,99 +152,104 @@ run-shell-scripts:
 # Creates a timestamped tarball with: volume data, app.ini config, container metadata
 export:
 	@echo "Exporting Gogs configuration and data..."
-	@EXPORT_DIR=$$(mktemp -d); \
-	 trap 'rm -rf $$EXPORT_DIR' EXIT; \
-	 if [ ! -d /tmp/gogs-config ] || [ ! -f /tmp/gogs-config/app.ini ]; then \
-		 echo "Warning: No existing Gogs configuration found at /tmp/gogs-config/app.ini"; \
-		 echo "You may need to run 'make build' first to create the configuration."; \
-	 fi; \
-	 \
-	 # Stop container if running
-	 @echo "Stopping Gogs container..."; \
-	 podman stop gogs 2>/dev/null || true; \
-	 \
-	 # Export volume data
-	 @echo "Exporting volume data..."; \
-	 podman run --rm -v gogs_data:/data -v $$EXPORT_DIR:/export alpine tar czf /export/gogs_data.tar.gz -C /data . 2>/dev/null || { \
-		 echo "Warning: Some volume data could not be exported. The container may not exist."; \
-	 }; \
-	 \
-	 # Export configuration files
-	 @echo "Exporting configuration..."; \
-	 if [ -f /tmp/gogs-config/app.ini ]; then \
-		 cp /tmp/gogs-config/app.ini $$EXPORT_DIR/app.ini; \
-	 else \
-		 echo "# No app.ini found - using default configuration" > $$EXPORT_DIR/app.ini; \
-	 fi; \
-	 \
-	 # Export container metadata (labels, environment)
-	 @echo "Exporting container metadata..."; \
-	 mkdir -p $$EXPORT_DIR/container; \
-	 podman inspect gogs --format "{{(json .Config)}}" 2>/dev/null | tr -d '\n' > $$EXPORT_DIR/container/config.json 2>/dev/null || echo '{"warning":"No existing container config"}' > $$EXPORT_DIR/container/config.json; \
-	 \
-	 # Create timestamped tarball
-	 @BACKUP_FILE=$$(pwd)/gogs-backup-$$(date +%Y%m%d-%H%M%S).tar.gz; \
-	 tar czf $$BACKUP_FILE -C $$EXPORT_DIR .; \
-	 \
-	 @echo ""; \
-	 @echo "========================================"; \
-	 @echo "Export complete!"; \
-	 @echo "========================================"; \
-	 @echo "Backup file: $$BACKUP_FILE"; \
-	 @echo ""; \
-	 @echo "To restore this backup, use:"; \
-	 @echo "  make import BACKUP_FILE=$$BACKUP_FILE"; \
-	 @echo ""
+	EXPORT_DIR=$$(mktemp -d); \
+	trap 'rm -rf $$EXPORT_DIR' EXIT; \
+	if [ ! -d /tmp/gogs-config ] || [ ! -f /tmp/gogs-config/app.ini ]; then \
+		echo "Warning: No existing Gogs configuration found at /tmp/gogs-config/app.ini"; \
+		echo "You may need to run 'make build' first to create the configuration."; \
+	fi; \
+	\
+	echo "Stopping Gogs container..."; \
+	podman stop gogs 2>/dev/null || true; \
+	echo "Exporting volume data..."; \
+	if [ -d "$$HOME/.local/share/containers/storage/volumes/gogs_data/_data" ]; then \
+		tar czf $$EXPORT_DIR/gogs_data.tar.gz -C $$HOME/.local/share/containers/storage/volumes/gogs_data/_data .; \
+	elif command -v podman >/dev/null 2>&1; then \
+		podman run --rm -v gogs_data:/data -v $$EXPORT_DIR:/export alpine tar czf /export/gogs_data.tar.gz -C /data . 2>/dev/null || { \
+			echo "Warning: Some volume data could not be exported. The container may not exist."; \
+		}; \
+	else \
+		echo "Warning: Neither podman nor volume data directory found. Skipping volume export."; \
+	fi; \
+	\
+	echo "Exporting configuration..."; \
+	if [ -f /tmp/gogs-config/app.ini ]; then \
+		cp /tmp/gogs-config/app.ini $$EXPORT_DIR/app.ini; \
+	else \
+		echo "# No app.ini found - using default configuration" > $$EXPORT_DIR/app.ini; \
+	fi; \
+	\
+	echo "Exporting container metadata..."; \
+	mkdir -p $$EXPORT_DIR/container; \
+	podman inspect gogs --format "{{(json .Config)}}" 2>/dev/null | tr -d '\n' > $$EXPORT_DIR/container/config.json 2>/dev/null || echo '{"warning":"No existing container config"}' > $$EXPORT_DIR/container/config.json; \
+	BACKUP_FILE=$$(pwd)/gogs-backup-$$(date +%Y%m%d-%H%M%S).tar.gz; \
+	tar czf $$BACKUP_FILE -C $$EXPORT_DIR .; \
+	\
+	echo ""; \
+	echo "========================================"; \
+	echo "Export complete!"; \
+	echo "========================================"; \
+	echo "Backup file: $$BACKUP_FILE"; \
+	echo ""; \
+	echo "To restore this backup, use:"; \
+	echo "  make import BACKUP_FILE=$$BACKUP_FILE"; \
+	@echo ""
 
 # Import (restore) Gogs from a backup tarball
 # Usage: make import BACKUP_FILE=/path/to/backup.tar.gz
 import:
 	@echo "Importing Gogs from backup..."
-	@if [ -z "$(BACKUP_FILE)" ]; then \
+	if [ -z "$(BACKUP_FILE)" ]; then \
 		echo "Error: BACKUP_FILE parameter is required."; \
 		echo "Usage: make import BACKUP_FILE=/path/to/backup.tar.gz"; \
 		exit 1; \
 	fi; \
 	 \
-	@if [ ! -f "$(BACKUP_FILE)" ]; then \
+	if [ ! -f "$(BACKUP_FILE)" ]; then \
 		echo "Error: Backup file '$(BACKUP_FILE)' not found."; \
 		exit 1; \
 	fi; \
 	 \
-	@echo "Reading backup metadata..."; \
-	@BACKUP_DIR=$$(mktemp -d); \
+	echo "Reading backup metadata..."; \
+	BACKUP_DIR=$$(mktemp -d); \
 	 tar xzf "$(BACKUP_FILE)" -C $$BACKUP_DIR; \
 	 \
-	@echo "Stopping existing Gogs container if running..."; \
+	echo "Stopping existing Gogs container if running..."; \
 	 podman stop gogs 2>/dev/null || true; \
 	 podman rm gogs 2>/dev/null || true; \
 	 \
-	@echo "Creating Gogs data volume..."; \
+	echo "Creating Gogs data volume..."; \
 	 podman volume create gogs_data 2>/dev/null || true; \
 	 \
-	@echo "Restoring volume data..."; \
-	 podman run --rm -v gogs_data:/data -v $$BACKUP_DIR:/import:ro alpine tar xzf /import/gogs_data.tar.gz -C /data 2>/dev/null || { \
-		 echo "Warning: Some volume data could not be restored. The container may not have been exported correctly."; \
-	 }; \
+	echo "Restoring volume data..."; \
+	if [ -d "$$HOME/.local/share/containers/storage/volumes/gogs_data/_data" ]; then \
+		tar xzf $$BACKUP_DIR/gogs_data.tar.gz -C $$HOME/.local/share/containers/storage/volumes/gogs_data/_data; \
+	elif command -v podman >/dev/null 2>&1; then \
+		podman run --rm -v gogs_data:/data -v $$BACKUP_DIR:/import:ro alpine tar xzf /import/gogs_data.tar.gz -C /data 2>/dev/null || { \
+			echo "Warning: Some volume data could not be restored. The container may not have been exported correctly."; \
+		}; \
+	else \
+		echo "Warning: Neither podman nor volume data directory found. Skipping volume restore."; \
+	fi; \
 	 \
-	@echo "Restoring configuration..."; \
+	echo "Restoring configuration..."; \
 	 mkdir -p /tmp/gogs-config; \
 	 cp $$BACKUP_DIR/app.ini /tmp/gogs-config/app.ini; \
 	 \
-	@echo "Starting Gogs container..."; \
+	echo "Starting Gogs container..."; \
 	 python src/python/create_gogs_container.py; \
 	 \
-	@echo ""; \
-	@echo "========================================"; \
-	@echo "Import complete!"; \
-	@echo "========================================"; \
-	@echo "Gogs has been restored from backup:"; \
-	@echo "  Backup file: $(BACKUP_FILE)"; \
-	@echo "  Access URL: http://localhost:3000"; \
-	@echo ""; \
-	@echo "To manage your Gogs instance, use:"; \
-	@echo "  make start"; \
-	@echo "  make stop"; \
-	@echo "  make restart"; \
-	@echo "  make logs"; \
+	echo ""; \
+	echo "========================================"; \
+	echo "Import complete!"; \
+	echo "========================================"; \
+	echo "Gogs has been restored from backup:"; \
+	echo "  Backup file: $(BACKUP_FILE)"; \
+	echo "  Access URL: http://localhost:3000"; \
+	echo ""; \
+	echo "To manage your Gogs instance, use:"; \
+	echo "  make start"; \
+	echo "  make stop"; \
+	echo "  make restart"; \
+	echo "  make logs"; \
 	@echo ""

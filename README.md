@@ -45,6 +45,29 @@ make podman-setup
 ./src/scripts/setup_gogs.sh
 ```
 
+## Backup and Restore
+
+### Export (Backup)
+Creates a timestamped tarball containing the full Gogs volume data (repositories, database, SSH keys), configuration (`app.ini`), and container metadata.
+
+```bash
+make export
+```
+
+The backup file will be created in the current directory as `gogs-backup-YYYYMMDD-HHMMSS.tar.gz`.
+
+### Import (Restore)
+Restores Gogs from a previously created backup tarball. Requires the `BACKUP_FILE` parameter.
+
+```bash
+make import BACKUP_FILE=/path/to/gogs-backup-YYYYMMDD-HHMMSS.tar.gz
+```
+
+Example:
+```bash
+make import BACKUP_FILE=/home/user/gogs-backup-20261024-120000.tar.gz
+```
+
 ## Requirements
 
 - Docker or Podman

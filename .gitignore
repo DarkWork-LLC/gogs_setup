@@ -4,3 +4,4 @@
 .pytest*
 .venv
 __pycache*
+*.tar*
