@@ -1,0 +1,398 @@
+---
+# Ansible Playbook to set up Gogs with Podman and SQLite
+# This playbook creates a persistent Gogs installation using Podman
+#
+# Usage:
+#   ansible-playbook -i localhost, -c local gogs-podman-setup.yml
+#
+# Requirements:
+#   - podman installed on the target host
+#   - ansible-core or ansible >= 2.9
+
+- name: Setup Gogs with Podman (SQLite)
+  hosts: localhost
+  connection: local
+  become: false  # Run as current user (non-root podman)
+  gather_facts: true
+
+  vars:
+    # Configuration variables
+    gogs_container_name: gogs
+    gogs_image: docker.io/gogs/gogs:latest
+    gogs_port: 3000
+    gogs_ssh_port: 2222
+    
+    # Volume names (persistent across container restarts)
+    gogs_data_volume: gogs_data
+    
+    # App configuration
+    gogs_domain: localhost
+    gogs_root_url: http://127.0.0.1:3000/
+
+  tasks:
+    - name: Check if podman is installed
+      command: podman --version
+      register: podman_check
+      changed_when: false
+      failed_when: podman_check.rc != 0
+
+    - name: Check if newuidmap is available (for rootless podman)
+      command: which newuidmap
+      register: newuidmap_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check if slirp4netns is available (for rootless networking)
+      command: which slirp4netns
+      register: slirp4netns_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check if pasta is available (for network namespace configuration)
+      command: which pasta
+      register: pasta_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display podman version and dependencies
+      debug:
+        msg: |
+          Podman version: {{ podman_check.stdout }}
+          newuidmap available: {{ newuidmap_check.rc == 0 }}
+          slirp4netns available: {{ slirp4netns_check.rc == 0 }}
+          pasta available: {{ pasta_check.rc == 0 }}
+          
+          Note: If newuidmap is not available, podman rootless mode may not work properly.
+          On Debian/Ubuntu: sudo apt install uidmap
+          On Fedora/RHEL: sudo dnf install shadow-utils
+          
+          Note: If slirp4netns is not available, networking may not work properly.
+          On Debian/Ubuntu: sudo apt install slirp4netns
+          On Fedora/RHEL: sudo dnf install slirp4netns
+          
+          Note: If pasta is not available, you may encounter network namespace configuration errors.
+          This playbook will try to work around this by using different networking approaches.
+
+    - name: Stop existing Gogs container if running
+      command: podman stop {{ gogs_container_name }}
+      register: stop_result
+      changed_when: stop_result.rc == 0
+      failed_when: false  # Continue even if container doesn't exist
+
+    - name: Force remove existing Gogs container if exists
+      command: podman rm -f {{ gogs_container_name }}
+      register: rm_result
+      changed_when: rm_result.rc == 0
+      failed_when: false  # Continue even if container doesn't exist
+
+    - name: Clean up any stale container with same name
+      command: podman rm -f {{ gogs_container_name }} 2>/dev/null || true
+      changed_when: false
+      failed_when: false
+
+    - name: Create persistent volume for Gogs data
+      command: podman volume create {{ gogs_data_volume }}
+      register: data_vol_create
+      changed_when: data_vol_create.rc == 0
+      failed_when: false
+
+    - name: Display volume information
+      debug:
+        msg: |
+          Created volumes:
+          - {{ gogs_data_volume }} (for Gogs application data and database)
+          
+          This volume persists all data even when the container is removed.
+
+    - name: Pull Gogs image
+      command: podman pull {{ gogs_image }}
+      changed_when: true
+
+    - name: Create Gogs configuration directory
+      file:
+        path: /tmp/gogs-config
+        state: directory
+        mode: '0755'
+
+    - name: Remove stale app.ini if exists
+      file:
+        path: /tmp/gogs-config/app.ini
+        state: absent
+
+    - name: Create Gogs app.ini configuration file
+      copy:
+        content: |
+          [server]
+          APP_DATA_PATH = /data/gogs
+          DOMAIN           = localhost
+          HTTP_PORT        = {{ gogs_port }}
+          HTTP_ADDR        = 0.0.0.0
+          EXTERNAL_URL     = http://127.0.0.1:{{ gogs_port }}/
+          DISABLE_SSH      = false
+          SSH_PORT         = {{ gogs_ssh_port }}
+          SSH_LISTEN_PORT  = {{ gogs_ssh_port }}
+          START_SSH_SERVER = true
+          OFFLINE_MODE     = false
+
+          [database]
+          TYPE = sqlite3
+          PATH = /data/gogs/data/gogs.db
+
+          [repository]
+          ROOT = /data/git
+
+          [security]
+          INSTALL_LOCK = true
+          SECRET_KEY   = gogs-secret-key-123456789012345678901234
+
+          [auth]
+          REQUIRE_EMAIL_CONFIRMATION = false
+          DISABLE_REGISTRATION       = false
+          ENABLE_REGISTRATION_CAPTCHA = false
+          REQUIRE_SIGNIN_VIEW        = false
+
+          [user]
+          ENABLE_EMAIL_NOTIFICATION = false
+
+          [picture]
+          DISABLE_GRAVATAR        = false
+          ENABLE_FEDERATED_AVATAR = true
+
+          [session]
+          PROVIDER = file
+
+          [log]
+          MODE      = console
+          LEVEL     = Info
+          ROOT_PATH = /app/gogs/log
+
+          [log.console]
+          LEVEL = console
+        dest: /tmp/gogs-config/app.ini
+      register: config_create
+      changed_when: config_create is changed
+
+    - name: Check if ports are available
+      shell: "netstat -tuln | grep -E ':(3000|2222)' || echo 'ports available'"
+      register: port_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display port availability
+      debug:
+        msg: "Port check result: {{ port_check.stdout }}"
+
+    - name: Create and run Gogs container with fallback networking
+      block:
+        - name: Try creating container with host networking (avoids pasta dependency)
+          command: >
+            podman run -d
+            --replace
+            --name {{ gogs_container_name }}
+            --network host
+            --restart unless-stopped
+            --label "io.containers.autoupdate=image"
+            --label "io.podman.desktop=true"
+            --label "app=gogs"
+            --label "version={{ gogs_port }}"
+            -v {{ gogs_data_volume }}:/data
+            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
+            -e USER_UID=1000
+            -e USER_GID=1000
+            -e GIT_DISCOVERY=true
+            -e HTTP_ADDR=0.0.0.0
+            -e HTTP_PORT=3000
+            -e SSH_PORT=22
+            -e SSH_LISTEN_PORT=22
+            {{ gogs_image }}
+          register: container_create_host
+          changed_when: container_create_host.rc == 0
+          retries: 2
+          delay: 2
+          ignore_errors: true
+
+        - name: If host networking fails, try with default networking
+          command: >
+            podman run -d
+            --replace
+            --name {{ gogs_container_name }}
+            --publish {{ gogs_port }}:3000
+            --publish {{ gogs_ssh_port }}:22
+            --restart unless-stopped
+            --label "io.containers.autoupdate=image"
+            --label "io.podman.desktop=true"
+            --label "app=gogs"
+            --label "version={{ gogs_port }}"
+            -v {{ gogs_data_volume }}:/data
+            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
+            -e USER_UID=1000
+            -e USER_GID=1000
+            -e GIT_DISCOVERY=true
+            -e HTTP_ADDR=0.0.0.0
+            -e HTTP_PORT=3000
+            -e SSH_PORT=22
+            -e SSH_LISTEN_PORT=22
+            {{ gogs_image }}
+          register: container_create_default
+          changed_when: container_create_default.rc == 0
+          when: container_create_host is failed
+          retries: 2
+          delay: 2
+          ignore_errors: true
+
+        - name: Set container_create result from successful attempt
+          set_fact:
+            container_create: "{{ container_create_host if container_create_host is succeeded else container_create_default }}"
+          when: container_create_host is succeeded or container_create_default is succeeded
+
+      rescue:
+        - name: Force remove any partially created container
+          command: podman rm -f {{ gogs_container_name }} 2>/dev/null || true
+          changed_when: false
+          failed_when: false
+
+        - name: Try creating container with minimal options and host networking
+          command: >
+            podman run -d
+            --replace
+            --name {{ gogs_container_name }}
+            --network host
+            --restart unless-stopped
+            -v {{ gogs_data_volume }}:/data
+            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
+            -e USER_UID=1000
+            -e USER_GID=1000
+            -e HTTP_ADDR=0.0.0.0
+            -e HTTP_PORT=3000
+            {{ gogs_image }}
+          register: container_create_minimal
+          changed_when: container_create_minimal.rc == 0
+          retries: 3
+          delay: 3
+          ignore_errors: true
+
+    - name: Check if container is running after creation
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{.Names}} {{.Status}}{% endraw %}' | grep -q -i -E 'Up|running'"
+      register: container_running
+      changed_when: false
+      retries: 5
+      delay: 3
+      ignore_errors: true
+
+    - name: Start container if it's not running
+      command: "podman start {{ gogs_container_name }}"
+      register: container_start
+      changed_when: container_start.rc == 0
+      when: container_running is failed or container_running.stdout is not search('running')
+      ignore_errors: true
+
+    - name: Wait for Gogs to start
+      pause:
+        seconds: 10
+
+    - name: Verify container is running before SSH key generation
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{.Status}}{% endraw %}' | grep -q 'Up' && echo 'running' || echo 'not running'"
+      register: verify_running
+      changed_when: false
+      failed_when: false
+
+    - name: Generate SSH host keys to fix recurring errors
+      command: >
+        podman exec {{ gogs_container_name }} /bin/sh -c '
+        if [ ! -f /data/ssh/ssh_host_rsa_key ]; then
+          echo "Generating SSH host keys..."
+          mkdir -p /data/ssh
+          ssh-keygen -t rsa -b 4096 -f /data/ssh/ssh_host_rsa_key -N ""
+          ssh-keygen -t ecdsa -b 521 -f /data/ssh/ssh_host_ecdsa_key -N ""
+          ssh-keygen -t ed25519 -f /data/ssh/ssh_host_ed25519_key -N ""
+          chown -R 1000:1000 /data/ssh
+          chmod 600 /data/ssh/ssh_host_*_key
+          chmod 644 /data/ssh/ssh_host_*_key.pub
+          echo "SSH host keys generated successfully"
+        else
+          echo "SSH host keys already exist"
+        fi'
+      register: ssh_key_gen
+      changed_when: "'Generating SSH host keys' in ssh_key_gen.stdout"
+      retries: 3
+      delay: 5
+      when: verify_running.stdout == 'running'
+      ignore_errors: true
+
+    - name: Get container status
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{.Names}}: {{.Status}}{% endraw %}'"
+      register: container_status
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        msg: "Container status: {{ container_status.stdout }}"
+
+    - name: Get container IP address
+      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{.NetworkSettings.IPAddress}}{% endraw %}'"
+      register: container_ip
+      changed_when: false
+      failed_when: false
+
+    - name: Get container info
+      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{.HostConfig.RestartPolicy.Name}}{% endraw %}'"
+      register: restart_policy
+      changed_when: false
+
+    - name: Display restart policy
+      debug:
+        msg: "Container restart policy: {{ restart_policy.stdout }}"
+
+    - name: Display container IP and access information
+      debug:
+        msg: |
+          Container IP: {{ container_ip.stdout | default('Not available in slirp4netns mode') }}
+          
+          For slirp4netns networking, access Gogs at:
+          - Web: http://localhost:{{ gogs_port }} or http://127.0.0.1:{{ gogs_port }}
+          - SSH: localhost:{{ gogs_ssh_port }} or 127.0.0.1:{{ gogs_ssh_port }}
+
+    - name: Display setup complete message
+      debug:
+        msg: |
+          ========================================
+          Gogs Setup Complete!
+          ========================================
+          
+          Access Gogs at: http://127.0.0.1:{{ gogs_port }}
+          SSH access at: 127.0.0.1:{{ gogs_ssh_port }}
+          
+          Container name: {{ gogs_container_name }}
+          Restart policy: {{ restart_policy.stdout }}
+          
+          Data volumes:
+            - {{ gogs_data_volume }} → /data (application data and database)
+          
+          Important notes:
+          - The container will automatically restart after system reboot
+          - Data persists across container restarts and removals
+          - To stop: podman stop {{ gogs_container_name }}
+          - To remove: podman rm -v {{ gogs_container_name }}
+          - To view logs: podman logs -f {{ gogs_container_name }}
+          ========================================
+
+# Additional utility tasks (can be run separately)
+- name: Utility tasks for Gogs management
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    gogs_data_volume: gogs_data
+  
+  tasks:
+    - name: List Gogs volumes
+      command: podman volume ls --filter name={{ gogs_data_volume }}
+      register: volumes_list
+      changed_when: false
+      tags: [list]
+
+    - name: Display volume list
+      debug:
+        var: volumes_list.stdout
+      tags: [list]

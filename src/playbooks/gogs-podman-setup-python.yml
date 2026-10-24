@@ -1,0 +1,225 @@
+---
+# Ansible Playbook to set up Gogs with Podman using Python API
+# This playbook creates a persistent Gogs installation using Podman Python API
+#
+# Usage:
+#   ansible-playbook -i localhost, -c local gogs-podman-setup-python.yml
+
+- name: Setup Gogs with Podman (Python API)
+  hosts: localhost
+  connection: local
+  become: false  # Run as current user (non-root podman)
+  gather_facts: true
+
+  vars:
+    # Configuration variables
+    gogs_container_name: gogs
+    gogs_image: docker.io/gogs/gogs:latest
+    gogs_port: 3000
+    gogs_ssh_port: 2222
+    
+    # Volume names (persistent across container restarts)
+    gogs_data_volume: gogs_data
+    
+    # App configuration
+    gogs_domain: localhost
+    gogs_root_url: http://127.0.0.1:3000/
+
+  tasks:
+    - name: Create Gogs configuration directory
+      command: mkdir -p /tmp/gogs-config
+      changed_when: true
+
+    - name: Create Gogs app.ini configuration file
+      copy:
+        content: |
+          [server]
+          APP_DATA_PATH = /data/gogs
+          DOMAIN           = localhost
+          HTTP_PORT        = {{ gogs_port }}
+          HTTP_ADDR        = 0.0.0.0
+          ROOT_URL         = http://127.0.0.1:{{ gogs_port }}/
+          DISABLE_SSH      = false
+          SSH_PORT         = {{ gogs_ssh_port }}
+          SSH_LISTEN_PORT  = {{ gogs_ssh_port }}
+          START_SSH_SERVER = true
+          OFFLINE_MODE     = false
+
+          [database]
+          DB_TYPE  = sqlite3
+          HOST     = 127.0.0.1:3306
+          NAME     = gogs
+          USER     = root
+          PASSWD   =
+          SSL_MODE = disable
+          CHARSET  = utf8
+          PATH     = /data/gogs/data/gogs.db
+
+          [repository]
+          ROOT = /data/git
+
+          [security]
+          INSTALL_LOCK = true
+          SECRET_KEY   = gogs-secret-key-123456789012345678901234
+
+          [service]
+          REGISTER_EMAIL_CONFIRM            = false
+          ENABLE_NOTIFY_MAIL                = false
+          DISABLE_REGISTRATION              = false
+          ALLOW_ONLY_EXTERNAL_REGISTRATION  = false
+          ENABLE_CAPTCHA                    = false
+          REQUIRE_SIGNIN_VIEW               = false
+          DEFAULT_KEEP_EMAIL_PRIVATE        = false
+          DEFAULT_ALLOW_CREATE_ORGANIZATION = true
+          DEFAULT_ENABLE_TIMETRACKING       = true
+          NO_REPLY_ADDRESS                  = noreply.localhost
+
+          [picture]
+          DISABLE_GRAVATAR        = false
+          ENABLE_FEDERATED_AVATAR = true
+
+          [openid]
+          ENABLE_OPENID_SIGNIN = true
+          ENABLE_OPENID_SIGNUP = true
+
+          [session]
+          PROVIDER = file
+
+          [log]
+          MODE      = console
+          LEVEL     = Info
+          ROOT_PATH = /app/gogs/log
+
+          [log.console]
+          LEVEL = console
+        dest: /tmp/gogs-config/app.ini
+      register: config_create
+      changed_when: config_create is changed
+
+    - name: Create and run Gogs container using Python API
+      podman_container:
+        name: "{{ gogs_container_name }}"
+        image: "{{ gogs_image }}"
+        state: started
+        recreate: yes
+        ports:
+          - "{{ gogs_port }}:3000"
+          - "{{ gogs_ssh_port }}:22"
+        restart_policy: unless-stopped
+        labels:
+          io.containers.autoupdate: "image"
+          io.podman.desktop: "true"
+          app: "gogs"
+          version: "{{ gogs_port }}"
+        volumes:
+          - "{{ gogs_data_volume }}:/data"
+          - "/tmp/gogs-config/app.ini:/data/gogs/conf/app.ini"
+        env:
+          USER_UID: "1000"
+          USER_GID: "1000"
+          GIT_DISCOVERY: "true"
+          HTTP_ADDR: "0.0.0.0"
+          HTTP_PORT: "3000"
+          SSH_PORT: "22"
+          SSH_LISTEN_PORT: "22"
+      register: container_create
+      changed_when: container_create is changed
+
+    - name: Wait for Gogs to start
+      pause:
+        seconds: 10
+
+    - name: Generate SSH host keys to fix recurring errors
+      command: >
+        podman exec {{ gogs_container_name }} /bin/sh -c '
+        if [ ! -f /data/ssh/ssh_host_rsa_key ]; then
+          echo "Generating SSH host keys..."
+          mkdir -p /data/ssh
+          ssh-keygen -t rsa -b 4096 -f /data/ssh/ssh_host_rsa_key -N ""
+          ssh-keygen -t ecdsa -b 521 -f /data/ssh/ssh_host_ecdsa_key -N ""
+          ssh-keygen -t ed25519 -f /data/ssh/ssh_host_ed25519_key -N ""
+          chown -R 1000:1000 /data/ssh
+          chmod 600 /data/ssh/ssh_host_*_key
+          chmod 644 /data/ssh/ssh_host_*_key.pub
+          echo "SSH host keys generated successfully"
+        else
+          echo "SSH host keys already exist"
+        fi'
+      register: ssh_key_gen
+      changed_when: "'Generating SSH host keys' in ssh_key_gen.stdout"
+
+    - name: Get container status
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }}: {{ .Status }}{% endraw %}'"
+      register: container_status
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        msg: "Container status: {{ container_status.stdout }}"
+
+    - name: Get container IP address
+      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .NetworkSettings.IPAddress }}{% endraw %}'"
+      register: container_ip
+      changed_when: false
+      failed_when: false
+
+    - name: Get container info
+      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .HostConfig.RestartPolicy.Name }}{% endraw %}'"
+      register: restart_policy
+      changed_when: false
+
+    - name: Display restart policy
+      debug:
+        msg: "Container restart policy: {{ restart_policy.stdout }}"
+
+    - name: Display container IP and access information
+      debug:
+        msg: |
+          Container IP: {{ container_ip.stdout | default('Not available in slirp4netns mode') }}
+          
+          For slirp4netns networking, access Gogs at:
+          - Web: http://localhost:{{ gogs_port }} or http://127.0.0.1:{{ gogs_port }}
+          - SSH: localhost:{{ gogs_ssh_port }} or 127.0.0.1:{{ gogs_ssh_port }}
+
+    - name: Display setup complete message
+      debug:
+        msg: |
+          ========================================
+          Gogs Setup Complete!
+          ========================================
+          
+          Access Gogs at: http://127.0.0.1:{{ gogs_port }}
+          SSH access at: 127.0.0.1:{{ gogs_ssh_port }}
+          
+          Container name: {{ gogs_container_name }}
+          Restart policy: {{ restart_policy.stdout }}
+          
+          Data volumes:
+            - {{ gogs_data_volume }} → /data (application data and database)
+          
+          Important notes:
+          - The container will automatically restart after system reboot
+          - Data persists across container restarts and removals
+          - To stop: podman stop {{ gogs_container_name }}
+          - To remove: podman rm -v {{ gogs_container_name }}
+          - To view logs: podman logs -f {{ gogs_container_name }}
+          ========================================
+
+# Additional utility tasks (can be run separately)
+- name: Utility tasks for Gogs management
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  
+  tasks:
+    - name: List Gogs volumes
+      command: podman volume ls --filter name={{ gogs_data_volume }}
+      register: volumes_list
+      changed_when: false
+      tags: [list]
+
+    - name: Display volume list
+      debug:
+        var: volumes_list.stdout
+      tags: [list]

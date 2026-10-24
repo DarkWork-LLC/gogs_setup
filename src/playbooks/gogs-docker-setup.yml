@@ -1,0 +1,295 @@
+---
+# Ansible Playbook to set up Gogs with Docker and SQLite
+# This playbook creates a persistent Gogs installation using Docker
+#
+# Usage:
+#   ansible-playbook -i localhost, -c local gogs-docker-setup.yml
+#
+# Requirements:
+#   - docker installed on the target host
+#   - ansible-core or ansible >= 2.9
+
+- name: Setup Gogs with Docker (SQLite)
+  hosts: localhost
+  connection: local
+  become: false  # Run as current user (assuming docker group access)
+  gather_facts: true
+
+  vars:
+    # Configuration variables
+    gogs_container_name: gogs
+    gogs_image: gogs/gogs:latest
+    gogs_port: 3000
+    gogs_ssh_port: 2222
+    
+    # Volume names (persistent across container restarts)
+    gogs_data_volume: gogs_data
+    
+    # App configuration
+    gogs_domain: localhost
+    gogs_root_url: http://127.0.0.1:3000/
+
+  tasks:
+    - name: Check if docker is installed
+      command: docker --version
+      register: docker_check
+      changed_when: false
+      failed_when: docker_check.rc != 0
+
+    - name: Display docker version
+      debug:
+        msg: "Docker version: {{ docker_check.stdout }}"
+
+    - name: Stop existing Gogs container if running
+      command: docker stop {{ gogs_container_name }}
+      register: stop_result
+      changed_when: stop_result.rc == 0
+      failed_when: false  # Continue even if container doesn't exist
+
+    - name: Force remove existing Gogs container if exists
+      command: docker rm -f {{ gogs_container_name }}
+      register: rm_result
+      changed_when: rm_result.rc == 0
+      failed_when: false  # Continue even if container doesn't exist
+
+    - name: Clean up any stale container with same name
+      command: docker rm -f {{ gogs_container_name }} 2>/dev/null || true
+      changed_when: false
+      failed_when: false
+
+    - name: Create persistent volume for Gogs data
+      command: docker volume create {{ gogs_data_volume }}
+      register: data_vol_create
+      changed_when: data_vol_create.rc == 0
+      failed_when: false
+
+    - name: Display volume information
+      debug:
+        msg: |
+          Created volumes:
+          - {{ gogs_data_volume }} (for Gogs application data and database)
+          
+          This volume persists all data even when the container is removed.
+
+    - name: Pull Gogs image
+      command: docker pull {{ gogs_image }}
+      changed_when: true
+
+    - name: Create Gogs configuration directory
+      command: mkdir -p /tmp/gogs-config
+      changed_when: true
+
+    - name: Create Gogs app.ini configuration file
+      copy:
+        content: |
+          [server]
+          APP_DATA_PATH = /data/gogs
+          DOMAIN           = localhost
+          HTTP_PORT        = {{ gogs_port }}
+          HTTP_ADDR        = 0.0.0.0
+          ROOT_URL         = http://127.0.0.1:{{ gogs_port }}/
+          DISABLE_SSH      = false
+          SSH_PORT         = {{ gogs_ssh_port }}
+          SSH_LISTEN_PORT  = {{ gogs_ssh_port }}
+          START_SSH_SERVER = true
+          OFFLINE_MODE     = false
+
+          [database]
+          DB_TYPE  = sqlite3
+          HOST     = 127.0.0.1:3306
+          NAME     = gogs
+          USER     = root
+          PASSWD   =
+          SSL_MODE = disable
+          CHARSET  = utf8
+          PATH     = /data/gogs/data/gogs.db
+
+          [repository]
+          ROOT = /data/git
+
+          [security]
+          INSTALL_LOCK = true
+          SECRET_KEY   = gogs-secret-key-123456789012345678901234
+
+          [service]
+          REGISTER_EMAIL_CONFIRM            = false
+          ENABLE_NOTIFY_MAIL                = false
+          DISABLE_REGISTRATION              = false
+          ALLOW_ONLY_EXTERNAL_REGISTRATION  = false
+          ENABLE_CAPTCHA                    = false
+          REQUIRE_SIGNIN_VIEW               = false
+          DEFAULT_KEEP_EMAIL_PRIVATE        = false
+          DEFAULT_ALLOW_CREATE_ORGANIZATION = true
+          DEFAULT_ENABLE_TIMETRACKING       = true
+          NO_REPLY_ADDRESS                  = noreply.localhost
+
+          [picture]
+          DISABLE_GRAVATAR        = false
+          ENABLE_FEDERATED_AVATAR = true
+
+          [openid]
+          ENABLE_OPENID_SIGNIN = true
+          ENABLE_OPENID_SIGNUP = true
+
+          [session]
+          PROVIDER = file
+
+          [log]
+          MODE      = console
+          LEVEL     = Info
+          ROOT_PATH = /app/gogs/log
+
+          [log.console]
+          LEVEL = console
+        dest: /tmp/gogs-config/app.ini
+      register: config_create
+      changed_when: config_create is changed
+
+    - name: Create and run Gogs container
+      command: >
+        docker run -d
+        --name {{ gogs_container_name }}
+        --publish {{ gogs_port }}:3000
+        --publish {{ gogs_ssh_port }}:22
+        --restart unless-stopped
+        --label "app=gogs"
+        --label "version={{ gogs_port }}"
+        -v {{ gogs_data_volume }}:/data
+        -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
+        -e USER_UID=1000
+        -e USER_GID=1000
+        -e GIT_DISCOVERY=true
+        -e HTTP_ADDR=0.0.0.0
+        -e HTTP_PORT=3000
+        -e SSH_PORT=22
+        -e SSH_LISTEN_PORT=22
+        {{ gogs_image }}
+      register: container_create
+      changed_when: container_create.rc == 0
+      retries: 3
+      delay: 2
+      ignore_errors: true
+
+    - name: Check if container is running after creation
+      shell: "docker ps --filter name={{ gogs_container_name }} --format 'table {{.Names}} {{.Status}}' | grep -q running"
+      register: container_running
+      changed_when: false
+      retries: 5
+      delay: 3
+      ignore_errors: true
+
+    - name: Start container if it's not running
+      command: "docker start {{ gogs_container_name }}"
+      register: container_start
+      changed_when: container_start.rc == 0
+      when: container_running is failed or container_running.stdout is not search('running')
+      ignore_errors: true
+
+    - name: Wait for Gogs to start
+      pause:
+        seconds: 10
+
+    - name: Verify container is running before SSH key generation
+      shell: "docker ps --filter name={{ gogs_container_name }} --format '{{.Status}}' | grep -q 'Up' && echo 'running' || echo 'not running'"
+      register: verify_running
+      changed_when: false
+      failed_when: false
+
+    - name: Generate SSH host keys to fix recurring errors
+      command: >
+        docker exec {{ gogs_container_name }} /bin/sh -c '
+        if [ ! -f /data/ssh/ssh_host_rsa_key ]; then
+          echo "Generating SSH host keys..."
+          mkdir -p /data/ssh
+          ssh-keygen -t rsa -b 4096 -f /data/ssh/ssh_host_rsa_key -N ""
+          ssh-keygen -t ecdsa -b 521 -f /data/ssh/ssh_host_ecdsa_key -N ""
+          ssh-keygen -t ed25519 -f /data/ssh/ssh_host_ed25519_key -N ""
+          chown -R 1000:1000 /data/ssh
+          chmod 600 /data/ssh/ssh_host_*_key
+          chmod 644 /data/ssh/ssh_host_*_key.pub
+          echo "SSH host keys generated successfully"
+        else
+          echo "SSH host keys already exist"
+        fi'
+      register: ssh_key_gen
+      changed_when: "'Generating SSH host keys' in ssh_key_gen.stdout"
+      retries: 3
+      delay: 5
+      when: verify_running.stdout == 'running'
+      ignore_errors: true
+
+    - name: Get container status
+      shell: "docker ps --filter name={{ gogs_container_name }} --format '{{.Names}}: {{.Status}}'"
+      register: container_status
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        msg: "Container status: {{ container_status.stdout }}"
+
+    - name: Get container IP address
+      shell: "docker inspect {{ gogs_container_name }} --format '{{.NetworkSettings.IPAddress}}'"
+      register: container_ip
+      changed_when: false
+      failed_when: false
+
+    - name: Get container info
+      shell: "docker inspect {{ gogs_container_name }} --format '{{.HostConfig.RestartPolicy.Name}}'"
+      register: restart_policy
+      changed_when: false
+
+    - name: Display restart policy
+      debug:
+        msg: "Container restart policy: {{ restart_policy.stdout }}"
+
+    - name: Display container IP and access information
+      debug:
+        msg: |
+          Container IP: {{ container_ip.stdout | default('Not available in slirp4netns mode') }}
+          
+          Access Gogs at:
+          - Web: http://localhost:{{ gogs_port }} or http://127.0.0.1:{{ gogs_port }}
+          - SSH: localhost:{{ gogs_ssh_port }} or 127.0.0.1:{{ gogs_ssh_port }}
+
+    - name: Display setup complete message
+      debug:
+        msg: |
+          ========================================
+          Gogs Setup Complete!
+          ========================================
+          
+          Access Gogs at: http://127.0.0.1:{{ gogs_port }}
+          SSH access at: 127.0.0.1:{{ gogs_ssh_port }}
+          
+          Container name: {{ gogs_container_name }}
+          Restart policy: {{ restart_policy.stdout }}
+          
+          Data volumes:
+            - {{ gogs_data_volume }} → /data (application data and database)
+          
+          Important notes:
+          - The container will automatically restart after system reboot
+          - Data persists across container restarts and removals
+          - To stop: docker stop {{ gogs_container_name }}
+          - To remove: docker rm -v {{ gogs_container_name }}
+          - To view logs: docker logs -f {{ gogs_container_name }}
+          ========================================
+
+# Additional utility tasks (can be run separately)
+- name: Utility tasks for Gogs management
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  
+  tasks:
+    - name: List Gogs volumes
+      command: docker volume ls --filter name={{ gogs_data_volume }}
+      register: volumes_list
+      changed_when: false
+      tags: [list]
+
+    - name: Display volume list
+      debug:
+        var: volumes_list.stdout
+      tags: [list]
