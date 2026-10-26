@@ -59,7 +59,7 @@
           ROOT = /data/git
 
           [security]
-          INSTALL_LOCK = true
+          INSTALL_LOCK = false
           SECRET_KEY   = gogs-secret-key-123456789012345678901234
 
           [service]
@@ -104,7 +104,7 @@
         recreate: yes
         ports:
           - "{{ gogs_port }}:3000"
-          - "{{ gogs_ssh_port }}:22"
+          - "{{ gogs_ssh_port }}:{{ gogs_ssh_port }}"
         restart_policy: unless-stopped
         labels:
           io.containers.autoupdate: "image"

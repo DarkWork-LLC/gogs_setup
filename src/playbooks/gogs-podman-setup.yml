@@ -142,7 +142,7 @@
           ROOT = /data/git
 
           [security]
-          INSTALL_LOCK = true
+          INSTALL_LOCK = false
           SECRET_KEY   = gogs-secret-key-123456789012345678901234
 
           [auth]
@@ -202,8 +202,8 @@
             -e GIT_DISCOVERY=true
             -e HTTP_ADDR=0.0.0.0
             -e HTTP_PORT=3000
-            -e SSH_PORT=22
-            -e SSH_LISTEN_PORT=22
+            -e SSH_PORT={{ gogs_ssh_port }}
+            -e SSH_LISTEN_PORT={{ gogs_ssh_port }}
             {{ gogs_image }}
           register: container_create_host
           changed_when: container_create_host.rc == 0
@@ -217,7 +217,7 @@
             --replace
             --name {{ gogs_container_name }}
             --publish {{ gogs_port }}:3000
-            --publish {{ gogs_ssh_port }}:22
+            --publish {{ gogs_ssh_port }}:{{ gogs_ssh_port }}
             --restart unless-stopped
             --label "io.containers.autoupdate=image"
             --label "io.podman.desktop=true"
@@ -230,8 +230,8 @@
             -e GIT_DISCOVERY=true
             -e HTTP_ADDR=0.0.0.0
             -e HTTP_PORT=3000
-            -e SSH_PORT=22
-            -e SSH_LISTEN_PORT=22
+            -e SSH_PORT={{ gogs_ssh_port }}
+            -e SSH_LISTEN_PORT={{ gogs_ssh_port }}
             {{ gogs_image }}
           register: container_create_default
           changed_when: container_create_default.rc == 0

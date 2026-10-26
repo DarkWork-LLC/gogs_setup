@@ -68,7 +68,7 @@ def test_build_target():
     result = run_make_dry("build")
     assert result.returncode == 0, f"make build failed: {result.stderr}"
     # Should reference the correct Python script path
-    assert "src/python/create_gogs_container.py" in result.stdout
+    assert "src/python/run_playbook.py" in result.stdout
 
 
 def test_quick_build_target():

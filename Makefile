@@ -56,14 +56,14 @@ install-deps:
 
 # Build (run ansible playbook to create and start Gogs)
 build: install-deps
-	@echo "Setting up Gogs using Python script..."
-	@python src/python/create_gogs_container.py
+	@echo "Setting up Gogs using Ansible playbook (with Python fallback)..."
+	@python3 src/python/run_playbook.py
 	@echo "Setup complete. Access Gogs at: http://localhost:3000"
 
 # Quick build (skip dependency installation, direct to Python script)
 quick-build:
 	@echo "Quick setup - skipping dependency installation..."
-	@python src/python/create_gogs_container.py
+	@python3 src/python/create_gogs_container.py
 	@echo "Setup complete. Access Gogs at: http://localhost:3000"
 
 # Clean (stop and remove container and volumes)
@@ -126,7 +126,7 @@ desktop:
 # Run Python scripts
 run-python-scripts:
 	@echo "Running Python scripts..."
-	@python src/python/run_playbook.py
+	@python3 src/python/run_playbook.py
 	@echo "Python scripts completed."
 
 # Run shell scripts
@@ -150,6 +150,7 @@ run-shell-scripts:
 # Export (backup) Gogs configuration and data
 # Usage: make export
 # Creates a timestamped tarball with: volume data, app.ini config, container metadata
+
 export:
 	@echo "Exporting Gogs configuration and data..."
 	EXPORT_DIR=$$(mktemp -d); \
@@ -192,7 +193,7 @@ export:
 	echo "Backup file: $$BACKUP_FILE"; \
 	echo ""; \
 	echo "To restore this backup, use:"; \
-	echo "  make import BACKUP_FILE=$$BACKUP_FILE"; \
+	echo "  make import BACKUP_FILE=$$BACKUP_FILE"; 
 	@echo ""
 
 # Import (restore) Gogs from a backup tarball
@@ -237,7 +238,7 @@ import:
 	 cp $$BACKUP_DIR/app.ini /tmp/gogs-config/app.ini; \
 	 \
 	echo "Starting Gogs container..."; \
-	 python src/python/create_gogs_container.py; \
+	 python3 src/python/create_gogs_container.py; \
 	 \
 	echo ""; \
 	echo "========================================"; \

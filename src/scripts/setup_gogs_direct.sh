@@ -65,7 +65,7 @@ PATH = /data/gogs/data/gogs.db
 ROOT = /data/git
 
 [security]
-INSTALL_LOCK = true
+INSTALL_LOCK = false
 SECRET_KEY   = gogs-secret-key-123456789012345678901234
 
 [auth]
@@ -100,8 +100,10 @@ echo "Creating and starting Gogs container..."
 docker run -d \
     --name $CONTAINER_NAME \
     --publish $PORT:3000 \
-    --publish $SSH_PORT:22 \
+    --publish $SSH_PORT:$SSH_PORT \
     --restart unless-stopped \
+    --label "io.containers.autoupdate=image" \
+    --label "io.podman.desktop=true" \
     --label "app=gogs" \
     --label "version=$PORT" \
     -v $DATA_VOLUME:/data \
@@ -111,8 +113,8 @@ docker run -d \
     -e GIT_DISCOVERY=true \
     -e HTTP_ADDR=0.0.0.0 \
     -e HTTP_PORT=3000 \
-    -e SSH_PORT=22 \
-    -e SSH_LISTEN_PORT=22 \
+    -e SSH_PORT=$SSH_PORT \
+    -e SSH_LISTEN_PORT=$SSH_PORT \
     $IMAGE
 
 # Wait for container to start

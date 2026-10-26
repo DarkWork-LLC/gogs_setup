@@ -35,7 +35,7 @@ PATH = /data/gogs/data/gogs.db
 ROOT = /data/git
 
 [security]
-INSTALL_LOCK = true
+INSTALL_LOCK = false
 SECRET_KEY = gogs-secret-key-123456789012345678901234
 
 [auth]
@@ -84,7 +84,7 @@ podman run -d \
   --replace \
   --name gogs \
   --publish 3000:3000 \
-  --publish 2222:22 \
+  --publish 2222:2222 \
   --restart unless-stopped \
   --label "io.containers.autoupdate=image" \
   --label "io.podman.desktop=true" \
@@ -97,8 +97,8 @@ podman run -d \
   -e GIT_DISCOVERY=true \
   -e HTTP_ADDR=0.0.0.0 \
   -e HTTP_PORT=3000 \
-  -e SSH_PORT=22 \
-  -e SSH_LISTEN_PORT=22 \
+  -e SSH_PORT=2222 \
+  -e SSH_LISTEN_PORT=2222 \
   docker.io/gogs/gogs:latest
 
 echo "Gogs container created and started!"
