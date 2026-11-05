@@ -177,8 +177,14 @@ def create_gogs_container():
             except Exception:
                 pass
 
-        with open(config_path, "w") as f:
-            f.write(app_ini_content)
+        try:
+            with open(config_path, "w") as f:
+                f.write(app_ini_content)
+        except PermissionError:
+            import tempfile
+            fd, config_path = tempfile.mkstemp(prefix="gogs-app-", suffix=".ini", dir="/tmp")
+            with os.fdopen(fd, "w") as f:
+                f.write(app_ini_content)
 
         # Create volumes (handle case where volume already exists)
         try:
@@ -200,7 +206,7 @@ def create_gogs_container():
             "--label", "app=gogs",
             "--label", f"version={config['gogs_port']}",
             "-v", f"{config['gogs_data_volume']}:/data",
-            "-v", f"/tmp/gogs-app.ini:/data/gogs/conf/app.ini",
+            "-v", f"{config_path}:/data/gogs/conf/app.ini",
             "-e", "USER_UID=1000",
             "-e", "USER_GID=1000",
             "-e", "GIT_DISCOVERY=true",

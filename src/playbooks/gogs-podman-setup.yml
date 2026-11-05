@@ -181,8 +181,7 @@
           GOGS_START_SSH_SERVER: "{{ 'true' if gogs_start_ssh_server else 'false' }}"
 
     - name: Build and run container using Python script with environment configuration
-      command: >
-        GOGS_CONTAINER_NAME="{{ gogs_container_name }}" GOGS_IMAGE="{{ gogs_image }}"         GOGS_IMAGE_FALLBACK="{{ gogs_image_fallback }}"         GOGS_PORT="{{ gogs_port }}"         GOGS_SSH_PORT="{{ gogs_ssh_port }}"         GOGS_DATA_VOLUME="{{ gogs_data_volume }}"         GOGS_DOMAIN="{{ gogs_domain }}"         GOGS_ROOT_URL="{{ gogs_root_url }}"         GOGS_APP_DATA_PATH="{{ gogs_app_data_path }}"         GOGS_SECRET_KEY="{{ gogs_secret_key }}"         GOGS_INSTALL_LOCK="{{ 'true' if gogs_install_lock else 'false' }}"         GOGS_REQUIRE_EMAIL_CONFIRMATION="{{ 'true' if gogs_require_email_confirmation else 'false' }}"         GOGS_DISABLE_REGISTRATION="{{ 'true' if gogs_disable_registration else 'false' }}"         GOGS_ENABLE_FEDERATED_AVATAR="{{ 'true' if gogs_enable_federated_avatar else 'false' }}"         GOGS_DISABLE_GRAVATAR="{{ 'true' if gogs_disable_gravatar else 'false' }}"         GOGS_PROVIDER="{{ gogs_provider }}"         GOGS_LOG_LEVEL="{{ gogs_log_level }}"         GOGS_HTTP_ADDR="{{ gogs_http_addr }}"         GOGS_EXTERNAL_URL="{{ gogs_external_url }}"         GOGS_OFFLINE_MODE="{{ 'true' if gogs_offline_mode else 'false' }}"         GOGS_REQUIRE_SIGNIN_VIEW="{{ 'true' if gogs_require_signin_view else 'false' }}"         GOGS_SSH_LISTEN_PORT="{{ gogs_ssh_listen_port }}"         GOGS_START_SSH_SERVER="{{ 'true' if gogs_start_ssh_server else 'false' }}"         python3 {{ playbook_dir | dirname }}/python/create_gogs_container.py
+      command: python3 {{ playbook_dir | dirname }}/python/create_gogs_container.py
       environment:
         GOGS_CONTAINER_NAME: "{{ gogs_container_name }}"
         GOGS_IMAGE: "{{ gogs_image }}"
