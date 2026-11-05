@@ -170,7 +170,12 @@ export:
 			echo "Warning: Some volume data could not be exported. The container may not exist."; \
 		}; \
 	else \
-		echo "Warning: Neither podman nor volume data directory found. Skipping volume export."; \
+		# Podman not available, manually backup Gogs data directory if it exists \
+		if [ -d /data/gogs ]; then \
+			tar czf $$EXPORT_DIR/gogs_data.tar.gz -C /data gogs; \
+		else \
+			echo "Warning: Neither podman nor /data/gogs found. Skipping volume export."; \
+		fi; \
 	fi; \
 	\
 	echo "Exporting configuration..."; \
@@ -231,6 +236,13 @@ import:
 		}; \
 	else \
 		echo "Warning: Neither podman nor volume data directory found. Skipping volume restore."; \
+		# Podman not available, extract gogs_data.tar.gz to /data/gogs \\
+			if [ -f $$BACKUP_DIR/gogs_data.tar.gz ]; then \
+				mkdir -p /data/gogs; \
+				tar xzf $$BACKUP_DIR/gogs_data.tar.gz -C /data/gogs; \
+			else \
+				echo "Warning: Neither podman nor gogs_data.tar.gz found. Skipping volume restore."; \
+			fi; \\
 	fi; \
 	 \
 	echo "Restoring configuration..."; \

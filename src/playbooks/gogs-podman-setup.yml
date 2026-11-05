@@ -19,7 +19,8 @@
     # Configuration variables
     gogs_container_name: gogs
     gogs_image: docker.io/gogs/gogs:latest
-    gogs_port: 3000
+    gogs_image_fallback: docker.io/gogs/gogs:1
+    gogs_port: 6009
     gogs_ssh_port: 2222
     
     # Volume names (persistent across container restarts)
@@ -27,7 +28,22 @@
     
     # App configuration
     gogs_domain: localhost
-    gogs_root_url: http://127.0.0.1:3000/
+    gogs_root_url: http://localhost:{{ gogs_port }}/
+    gogs_app_data_path: /data/gogs
+    gogs_secret_key: GOGS_SECRET_KEY_7x3fL9p2mN4vR8yT5wK0qZ1xJ3cB6nG
+    gogs_install_lock: false
+    gogs_require_email_confirmation: false
+    gogs_disable_registration: false
+    gogs_enable_federated_avatar: true
+    gogs_disable_gravatar: false
+    gogs_provider: file
+    gogs_log_level: Info
+    gogs_http_addr: 0.0.0.0
+    gogs_external_url: http://127.0.0.1:{{ gogs_port }}/
+    gogs_offline_mode: false
+    gogs_require_signin_view: false
+    gogs_ssh_listen_port: "{{ gogs_ssh_port }}"
+    gogs_start_ssh_server: true
 
   tasks:
     - name: Check if podman is installed
@@ -104,9 +120,21 @@
           
           This volume persists all data even when the container is removed.
 
-    - name: Pull Gogs image
+    - name: Pull Gogs image with retries
       command: podman pull {{ gogs_image }}
-      changed_when: true
+      register: pull_result
+      retries: 3
+      delay: 10
+      until: pull_result is succeeded
+      changed_when: pull_result.rc == 0
+      failed_when: pull_result.rc != 0
+
+    - name: Try alternative image if primary pull fails
+      command: podman pull {{ gogs_image_fallback }}
+      register: pull_fallback
+      changed_when: pull_fallback.rc == 0
+      when: pull_result.rc != 0
+      failed_when: false
 
     - name: Create Gogs configuration directory
       file:
@@ -119,58 +147,78 @@
         path: /tmp/gogs-config/app.ini
         state: absent
 
-    - name: Create Gogs app.ini configuration file
-      copy:
-        content: |
-          [server]
-          APP_DATA_PATH = /data/gogs
-          DOMAIN           = localhost
-          HTTP_PORT        = {{ gogs_port }}
-          HTTP_ADDR        = 0.0.0.0
-          EXTERNAL_URL     = http://127.0.0.1:{{ gogs_port }}/
-          DISABLE_SSH      = false
-          SSH_PORT         = {{ gogs_ssh_port }}
-          SSH_LISTEN_PORT  = {{ gogs_ssh_port }}
-          START_SSH_SERVER = true
-          OFFLINE_MODE     = false
+    - name: Create Gogs configuration directory
+      file:
+        path: /tmp/gogs-config
+        state: directory
+        mode: '0755'
 
-          [database]
-          TYPE = sqlite3
-          PATH = /data/gogs/data/gogs.db
+    - name: Set environment variables for Gogs configuration
+      set_fact:
+        gogs_env_vars:
+          GOGS_CONTAINER_NAME: "{{ gogs_container_name }}"
+          GOGS_IMAGE: "{{ gogs_image }}"
+          GOGS_IMAGE_FALLBACK: "{{ gogs_image_fallback }}"
+          GOGS_PORT: "{{ gogs_port }}"
+          GOGS_SSH_PORT: "{{ gogs_ssh_port }}"
+          GOGS_DATA_VOLUME: "{{ gogs_data_volume }}"
+          GOGS_DOMAIN: "{{ gogs_domain }}"
+          GOGS_ROOT_URL: "{{ gogs_root_url }}"
+          GOGS_APP_DATA_PATH: "{{ gogs_app_data_path }}"
+          GOGS_SECRET_KEY: "{{ gogs_secret_key }}"
+          GOGS_INSTALL_LOCK: "{{ 'true' if gogs_install_lock else 'false' }}"
+          GOGS_REQUIRE_EMAIL_CONFIRMATION: "{{ 'true' if gogs_require_email_confirmation else 'false' }}"
+          GOGS_DISABLE_REGISTRATION: "{{ 'true' if gogs_disable_registration else 'false' }}"
+          GOGS_ENABLE_FEDERATED_AVATAR: "{{ 'true' if gogs_enable_federated_avatar else 'false' }}"
+          GOGS_DISABLE_GRAVATAR: "{{ 'true' if gogs_disable_gravatar else 'false' }}"
+          GOGS_PROVIDER: "{{ gogs_provider }}"
+          GOGS_LOG_LEVEL: "{{ gogs_log_level }}"
+          GOGS_HTTP_ADDR: "{{ gogs_http_addr }}"
+          GOGS_EXTERNAL_URL: "{{ gogs_external_url }}"
+          GOGS_OFFLINE_MODE: "{{ 'true' if gogs_offline_mode else 'false' }}"
+          GOGS_REQUIRE_SIGNIN_VIEW: "{{ 'true' if gogs_require_signin_view else 'false' }}"
+          GOGS_SSH_LISTEN_PORT: "{{ gogs_ssh_listen_port }}"
+          GOGS_START_SSH_SERVER: "{{ 'true' if gogs_start_ssh_server else 'false' }}"
 
-          [repository]
-          ROOT = /data/git
+    - name: Build and run container using Python script with environment configuration
+      command: >
+        GOGS_CONTAINER_NAME="{{ gogs_container_name }}" GOGS_IMAGE="{{ gogs_image }}"         GOGS_IMAGE_FALLBACK="{{ gogs_image_fallback }}"         GOGS_PORT="{{ gogs_port }}"         GOGS_SSH_PORT="{{ gogs_ssh_port }}"         GOGS_DATA_VOLUME="{{ gogs_data_volume }}"         GOGS_DOMAIN="{{ gogs_domain }}"         GOGS_ROOT_URL="{{ gogs_root_url }}"         GOGS_APP_DATA_PATH="{{ gogs_app_data_path }}"         GOGS_SECRET_KEY="{{ gogs_secret_key }}"         GOGS_INSTALL_LOCK="{{ 'true' if gogs_install_lock else 'false' }}"         GOGS_REQUIRE_EMAIL_CONFIRMATION="{{ 'true' if gogs_require_email_confirmation else 'false' }}"         GOGS_DISABLE_REGISTRATION="{{ 'true' if gogs_disable_registration else 'false' }}"         GOGS_ENABLE_FEDERATED_AVATAR="{{ 'true' if gogs_enable_federated_avatar else 'false' }}"         GOGS_DISABLE_GRAVATAR="{{ 'true' if gogs_disable_gravatar else 'false' }}"         GOGS_PROVIDER="{{ gogs_provider }}"         GOGS_LOG_LEVEL="{{ gogs_log_level }}"         GOGS_HTTP_ADDR="{{ gogs_http_addr }}"         GOGS_EXTERNAL_URL="{{ gogs_external_url }}"         GOGS_OFFLINE_MODE="{{ 'true' if gogs_offline_mode else 'false' }}"         GOGS_REQUIRE_SIGNIN_VIEW="{{ 'true' if gogs_require_signin_view else 'false' }}"         GOGS_SSH_LISTEN_PORT="{{ gogs_ssh_listen_port }}"         GOGS_START_SSH_SERVER="{{ 'true' if gogs_start_ssh_server else 'false' }}"         python3 {{ ansible_playbook_dir | dirname }}/src/python/create_gogs_container.py
+      environment:
+        GOGS_CONTAINER_NAME: "{{ gogs_container_name }}"
+        GOGS_IMAGE: "{{ gogs_image }}"
+        GOGS_IMAGE_FALLBACK: "{{ gogs_image_fallback }}"
+        GOGS_PORT: "{{ gogs_port }}"
+        GOGS_SSH_PORT: "{{ gogs_ssh_port }}"
+        GOGS_DATA_VOLUME: "{{ gogs_data_volume }}"
+        GOGS_DOMAIN: "{{ gogs_domain }}"
+        GOGS_ROOT_URL: "{{ gogs_root_url }}"
+        GOGS_APP_DATA_PATH: "{{ gogs_app_data_path }}"
+        GOGS_SECRET_KEY: "{{ gogs_secret_key }}"
+        GOGS_INSTALL_LOCK: "{{ 'true' if gogs_install_lock else 'false' }}"
+        GOGS_REQUIRE_EMAIL_CONFIRMATION: "{{ 'true' if gogs_require_email_confirmation else 'false' }}"
+        GOGS_DISABLE_REGISTRATION: "{{ 'true' if gogs_disable_registration else 'false' }}"
+        GOGS_ENABLE_FEDERATED_AVATAR: "{{ 'true' if gogs_enable_federated_avatar else 'false' }}"
+        GOGS_DISABLE_GRAVATAR: "{{ 'true' if gogs_disable_gravatar else 'false' }}"
+        GOGS_PROVIDER: "{{ gogs_provider }}"
+        GOGS_LOG_LEVEL: "{{ gogs_log_level }}"
+        GOGS_HTTP_ADDR: "{{ gogs_http_addr }}"
+        GOGS_EXTERNAL_URL: "{{ gogs_external_url }}"
+        GOGS_OFFLINE_MODE: "{{ 'true' if gogs_offline_mode else 'false' }}"
+        GOGS_REQUIRE_SIGNIN_VIEW: "{{ 'true' if gogs_require_signin_view else 'false' }}"
+        GOGS_SSH_LISTEN_PORT: "{{ gogs_ssh_listen_port }}"
+        GOGS_START_SSH_SERVER: "{{ 'true' if gogs_start_ssh_server else 'false' }}"
+      register: container_create
+      changed_when: container_create is changed
 
-          [security]
-          INSTALL_LOCK = false
-          SECRET_KEY   = gogs-secret-key-123456789012345678901234
+    - name: Check if ports are available
+      shell: "netstat -tuln | grep -E ':(3000|2222)' || echo 'ports available'"
+      register: port_check
+      changed_when: false
+      failed_when: false
 
-          [auth]
-          REQUIRE_EMAIL_CONFIRMATION = false
-          DISABLE_REGISTRATION       = false
-          ENABLE_REGISTRATION_CAPTCHA = false
-          REQUIRE_SIGNIN_VIEW        = false
-
-          [user]
-          ENABLE_EMAIL_NOTIFICATION = false
-
-          [picture]
-          DISABLE_GRAVATAR        = false
-          ENABLE_FEDERATED_AVATAR = true
-
-          [session]
-          PROVIDER = file
-
-          [log]
-          MODE      = console
-          LEVEL     = Info
-          ROOT_PATH = /app/gogs/log
-
-          [log.console]
-          LEVEL = console
-        dest: /tmp/gogs-config/app.ini
-      register: config_create
-      changed_when: config_create is changed
+    - name: Display port availability
+      debug:
+        msg: "Port check result: {{ port_check.stdout }}"
 
     - name: Check if ports are available
       shell: "netstat -tuln | grep -E ':(3000|2222)' || echo 'ports available'"
@@ -200,7 +248,7 @@
             -e USER_UID=1000
             -e USER_GID=1000
             -e GIT_DISCOVERY=true
-            -e HTTP_ADDR=0.0.0.0
+            -e HTTP_ADDR={{ gogs_http_addr }}
             -e HTTP_PORT=3000
             -e SSH_PORT={{ gogs_ssh_port }}
             -e SSH_LISTEN_PORT={{ gogs_ssh_port }}
@@ -228,7 +276,7 @@
             -e USER_UID=1000
             -e USER_GID=1000
             -e GIT_DISCOVERY=true
-            -e HTTP_ADDR=0.0.0.0
+            -e HTTP_ADDR={{ gogs_http_addr }}
             -e HTTP_PORT=3000
             -e SSH_PORT={{ gogs_ssh_port }}
             -e SSH_LISTEN_PORT={{ gogs_ssh_port }}
@@ -251,28 +299,8 @@
           changed_when: false
           failed_when: false
 
-        - name: Try creating container with minimal options and host networking
-          command: >
-            podman run -d
-            --replace
-            --name {{ gogs_container_name }}
-            --network host
-            --restart unless-stopped
-            -v {{ gogs_data_volume }}:/data
-            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
-            -e USER_UID=1000
-            -e USER_GID=1000
-            -e HTTP_ADDR=0.0.0.0
-            -e HTTP_PORT=3000
-            {{ gogs_image }}
-          register: container_create_minimal
-          changed_when: container_create_minimal.rc == 0
-          retries: 3
-          delay: 3
-          ignore_errors: true
-
     - name: Check if container is running after creation
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{.Names}} {{.Status}}{% endraw %}' | grep -q -i -E 'Up|running'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Names }} {{ .Status }}' | grep -q -i -E 'Up|running'"
       register: container_running
       changed_when: false
       retries: 5
@@ -291,7 +319,7 @@
         seconds: 10
 
     - name: Verify container is running before SSH key generation
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{.Status}}{% endraw %}' | grep -q 'Up' && echo 'running' || echo 'not running'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Status }}' | grep -q 'Up' && echo 'running' || echo 'not running'"
       register: verify_running
       changed_when: false
       failed_when: false
@@ -320,7 +348,7 @@
       ignore_errors: true
 
     - name: Get container status
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{.Names}}: {{.Status}}{% endraw %}'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Names }}: {{ .Status }}'"
       register: container_status
       changed_when: false
 
@@ -329,13 +357,13 @@
         msg: "Container status: {{ container_status.stdout }}"
 
     - name: Get container IP address
-      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{.NetworkSettings.IPAddress}}{% endraw %}'"
+      shell: "podman inspect {{ gogs_container_name }} --format '{{ .NetworkSettings.IPAddress }}'"
       register: container_ip
       changed_when: false
       failed_when: false
 
     - name: Get container info
-      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{.HostConfig.RestartPolicy.Name}}{% endraw %}'"
+      shell: "podman inspect {{ gogs_container_name }} --format '{{ .HostConfig.RestartPolicy.Name }}'"
       register: restart_policy
       changed_when: false
 
@@ -360,7 +388,7 @@
           ========================================
           
           Access Gogs at: http://127.0.0.1:{{ gogs_port }}
-          SSH access at: 127.0.0.1:{{ gogs_ssh_port }}
+          SSH access at: localhost:{{ gogs_ssh_port }} or 127.0.0.1:{{ gogs_ssh_port }}
           
           Container name: {{ gogs_container_name }}
           Restart policy: {{ restart_policy.stdout }}
