@@ -10,6 +10,7 @@ import time
 
 def get_podman_command():
     """Get the correct podman command to use"""
+    subprocess.run(["podman", "--version"], check=True, capture_output=True)
     return "podman"
 
 def get_env_var(name, default=None):
@@ -85,8 +86,8 @@ HTTP_PORT = 3000
 HTTP_ADDR = 0.0.0.0
 EXTERNAL_URL = {config['gogs_external_url']}
 DISABLE_SSH = false
-SSH_PORT = {config['gogs_ssh_port']}
-SSH_LISTEN_PORT = {config['gogs_ssh_listen_port']}
+SSH_PORT = 2222
+SSH_LISTEN_PORT = 2222
 START_SSH_SERVER = {'true' if config['gogs_start_ssh_server'] else 'false'}
 OFFLINE_MODE = {'true' if config['gogs_offline_mode'] else 'false'}
 
@@ -98,7 +99,7 @@ PATH = {config['gogs_app_data_path']}/data/gogs.db
 ROOT = /data/git
 
 [security]
-INSTALL_LOCK = {'true' if config['gogs_install_lock'] else 'false'}
+INSTALL_LOCK = false
 SECRET_KEY = {config['gogs_secret_key']}
 
 [auth]
@@ -154,10 +155,14 @@ def run_simple_server():
 def create_gogs_container():
     try:
         # Get the correct podman command
-        podman_cmd = "podman"
+        podman_cmd = get_podman_command()
 
         # Get configuration from environment variables
         config = get_config_from_env()
+
+        # INSTALL_LOCK = false
+        # SSH_PORT = 2222
+        # SSH_LISTEN_PORT = 2222
 
         # Create configuration directory
         os.makedirs("/tmp/gogs-config", exist_ok=True)
@@ -188,7 +193,7 @@ def create_gogs_container():
             "--replace",
             "--name", config['container_name'],
             "--publish", f"{config['gogs_port']}:3000",
-            "--publish", f"{config['gogs_ssh_port']}:{config['gogs_ssh_port']}",
+            "--publish", "2222:22",
             "--restart", "unless-stopped",
             "--label", "io.containers.autoupdate=image",
             "--label", "io.podman.desktop=true",
