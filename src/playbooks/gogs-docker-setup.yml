@@ -19,15 +19,15 @@
     # Configuration variables
     gogs_container_name: gogs
     gogs_image: gogs/gogs:latest
-    gogs_port: 3000
-    gogs_ssh_port: 2222
+    gogs_port: 2009
+    gogs_ssh_port: 4444
     
     # Volume names (persistent across container restarts)
     gogs_data_volume: gogs_data
     
     # App configuration
-    gogs_domain: localhost
-    gogs_root_url: http://127.0.0.1:3000/
+    gogs_domain: mofo-jackson
+    gogs_root_url: http://mofo-jackson:2009/
 
   tasks:
     - name: Check if docker is installed

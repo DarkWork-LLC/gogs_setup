@@ -80,26 +80,28 @@ def run_python_container_creation():
 
 
 def run_simple_server():
-    """Start a simple HTTP server for development when podman is not available."""
+    """Start a simple HTTP server for development when podman is not available.
+
+    This is non-blocking when called from make build - it prints instructions
+    and returns False so make build exits with an error instead of hanging.
+    """
     try:
-        PORT = 3002
-        Handler = http.server.SimpleHTTPRequestHandler
-
-        with socketserver.TCPServer(("", PORT), Handler) as httpd:
-            print(f"\nSimple HTTP Server running on port {PORT}")
-            print("Press Ctrl+C to stop the server")
-            print("Access Gogs at: http://localhost:3000")
-            print("\nNote: This is a simple server for testing purposes only.")
-            print("For a production setup, you'll need to install podman or docker.")
-
-            try:
-                httpd.serve_forever()
-            except KeyboardInterrupt:
-                print("\nServer stopped.")
-                return True
+        print("\n" + "=" * 60)
+        print("WARNING: Podman is not available. Cannot create Gogs container.")
+        print("=" * 60)
+        print("\nTo set up Gogs manually:")
+        print("  1. Install podman:")
+        print("     Ubuntu/Debian: sudo apt-get install podman")
+        print("     Fedora/RHEL:   sudo dnf install podman")
+        print("     CentOS:        sudo yum install podman")
+        print("\n  2. Then run: make build")
+        print("\nAlternatively, start a simple dev server with:")
+        print("  make quick-build")
+        print("\n" + "=" * 60)
+        return False
 
     except Exception as e:
-        print(f"Error starting server: {e}")
+        print(f"Error: {e}")
         return False
 
 
