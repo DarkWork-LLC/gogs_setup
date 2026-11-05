@@ -144,7 +144,7 @@
 
     - name: Remove stale app.ini if exists
       file:
-        path: /tmp/gogs-config/app.ini
+        path: /tmp/gogs-app.ini
         state: absent
 
     - name: Create Gogs configuration directory
@@ -243,7 +243,7 @@
             --label "app=gogs"
             --label "version={{ gogs_port }}"
             -v {{ gogs_data_volume }}:/data
-            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
+            -v /tmp/gogs-app.ini:/data/gogs/conf/app.ini
             -e USER_UID=1000
             -e USER_GID=1000
             -e GIT_DISCOVERY=true
@@ -271,7 +271,7 @@
             --label "app=gogs"
             --label "version={{ gogs_port }}"
             -v {{ gogs_data_volume }}:/data
-            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
+            -v /tmp/gogs-app.ini:/data/gogs/conf/app.ini
             -e USER_UID=1000
             -e USER_GID=1000
             -e GIT_DISCOVERY=true
@@ -299,7 +299,7 @@
           failed_when: false
 
     - name: Check if container is running after creation
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Names }} {{ .Status }}' | grep -q -i -E 'Up|running'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }} {{ .Status }}{% endraw %}' | grep -q -i -E 'Up|running'"
       register: container_running
       changed_when: false
       retries: 5
@@ -314,11 +314,11 @@
       ignore_errors: true
 
     - name: Wait for Gogs to start
-      pause:
-        seconds: 10
+      command: sleep 10
+      changed_when: false
 
     - name: Verify container is running before SSH key generation
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Status }}' | grep -q 'Up' && echo 'running' || echo 'not running'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Status }}{% endraw %}' | grep -q 'Up' && echo 'running' || echo 'not running'"
       register: verify_running
       changed_when: false
       failed_when: false
@@ -347,7 +347,7 @@
       ignore_errors: true
 
     - name: Get container status
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Names }}: {{ .Status }}'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }}: {{ .Status }}{% endraw %}'"
       register: container_status
       changed_when: false
 
