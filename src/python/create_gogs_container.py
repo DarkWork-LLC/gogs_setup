@@ -10,6 +10,7 @@ import time
 import shutil
 
 def get_podman_command():
+<<<<<<< HEAD
     """Get the correct podman command to use.
 
     Checks common installation locations in case podman is installed
@@ -32,6 +33,10 @@ def get_podman_command():
         if os.path.isfile(location) and os.access(location, os.X_OK):
             return location
 
+=======
+    """Get the correct podman command to use"""
+    subprocess.run(["podman", "--version"], check=True, capture_output=True)
+>>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
     return "podman"
 
 def get_env_var(name, default=None):
@@ -107,8 +112,8 @@ HTTP_PORT = 3000
 HTTP_ADDR = 0.0.0.0
 EXTERNAL_URL = {config['gogs_external_url']}
 DISABLE_SSH = false
-SSH_PORT = {config['gogs_ssh_port']}
-SSH_LISTEN_PORT = {config['gogs_ssh_listen_port']}
+SSH_PORT = 2222
+SSH_LISTEN_PORT = 2222
 START_SSH_SERVER = {'true' if config['gogs_start_ssh_server'] else 'false'}
 OFFLINE_MODE = {'true' if config['gogs_offline_mode'] else 'false'}
 
@@ -120,7 +125,7 @@ PATH = {config['gogs_app_data_path']}/data/gogs.db
 ROOT = /data/git
 
 [security]
-INSTALL_LOCK = {'true' if config['gogs_install_lock'] else 'false'}
+INSTALL_LOCK = false
 SECRET_KEY = {config['gogs_secret_key']}
 
 [auth]
@@ -181,6 +186,10 @@ def create_gogs_container():
         # Get configuration from environment variables
         config = get_config_from_env()
 
+        # INSTALL_LOCK = false
+        # SSH_PORT = 2222
+        # SSH_LISTEN_PORT = 2222
+
         # Create configuration directory
         os.makedirs("/tmp/gogs-config", exist_ok=True)
 
@@ -194,8 +203,14 @@ def create_gogs_container():
             except Exception:
                 pass
 
-        with open(config_path, "w") as f:
-            f.write(app_ini_content)
+        try:
+            with open(config_path, "w") as f:
+                f.write(app_ini_content)
+        except PermissionError:
+            import tempfile
+            fd, config_path = tempfile.mkstemp(prefix="gogs-app-", suffix=".ini", dir="/tmp")
+            with os.fdopen(fd, "w") as f:
+                f.write(app_ini_content)
 
         # Create volumes (handle case where volume already exists)
         try:
@@ -209,14 +224,23 @@ def create_gogs_container():
             podman_cmd, "run", "-d",
             "--replace",
             "--name", config['container_name'],
+<<<<<<< HEAD
             "--network", "host",
+=======
+            "--publish", f"{config['gogs_port']}:3000",
+            "--publish", "2222:22",
+>>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
             "--restart", "unless-stopped",
             "--label", "io.containers.autoupdate=image",
             "--label", "io.podman.desktop=true",
             "--label", "app=gogs",
             "--label", f"version={config['gogs_port']}",
             "-v", f"{config['gogs_data_volume']}:/data",
+<<<<<<< HEAD
             "-v", f"/tmp/gogs-config/app.ini:/data/gogs/conf/app.ini",
+=======
+            "-v", f"{config_path}:/data/gogs/conf/app.ini",
+>>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
             "-e", "USER_UID=1000",
             "-e", "USER_GID=1000",
             "-e", "GIT_DISCOVERY=true",
