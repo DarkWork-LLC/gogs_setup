@@ -21,17 +21,13 @@ import shutil
 class TestGetPodmanCommand:
     """Tests for get_podman_command function."""
 
-    @patch("create_gogs_container.subprocess.run")
-    def test_returns_podman(self, mock_run):
-        """Test that get_podman_command returns podman."""
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_returns_podman(self):
+        """Test that get_podman_command returns a valid podman path."""
         command = create_gogs_container.get_podman_command()
-        assert command == "podman"
+        assert command == "podman" or command.endswith("/podman")
 
-    @patch("create_gogs_container.subprocess.run")
-    def test_returns_string_not_none(self, mock_run):
+    def test_returns_string_not_none(self):
         """Test that get_podman_command returns a non-None string."""
-        mock_run.return_value = MagicMock(returncode=0)
         command = create_gogs_container.get_podman_command()
         assert isinstance(command, str)
         assert command is not None
@@ -123,9 +119,9 @@ class TestModuleStructure:
         assert 'INSTALL_LOCK = false' in src
 
     def test_ssh_port_config(self):
-        """Test SSH port is configured as 2222 for both host and container."""
+        """Test SSH port environment variables are configured with f-strings."""
         import inspect
         src = inspect.getsource(create_gogs_container.create_gogs_container)
-        assert 'SSH_PORT = 2222' in src
-        assert 'SSH_LISTEN_PORT = 2222' in src
-        assert '2222:22' in src
+        assert 'f"SSH_PORT={config[\'gogs_ssh_port\']}"' in src
+        assert 'f"SSH_LISTEN_PORT={config[\'gogs_ssh_listen_port\']}"' in src
+        assert '--network' in src and 'host' in src

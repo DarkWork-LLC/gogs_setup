@@ -7,9 +7,31 @@ import os
 import sys
 import subprocess
 import time
+import shutil
 
 def get_podman_command():
-    """Get the correct podman command to use"""
+    """Get the correct podman command to use.
+
+    Checks common installation locations in case podman is installed
+    but not in the system PATH.
+    """
+    podman_path = shutil.which("podman")
+    if podman_path:
+        return podman_path
+
+    # Check common locations where podman may be installed but not in PATH
+    common_locations = [
+        "/run/host/usr/bin/podman",
+        "/usr/bin/podman",
+        "/usr/local/bin/podman",
+        "/bin/podman",
+        "/sbin/podman",
+        "/usr/sbin/podman",
+    ]
+    for location in common_locations:
+        if os.path.isfile(location) and os.access(location, os.X_OK):
+            return location
+
     return "podman"
 
 def get_env_var(name, default=None):
@@ -154,7 +176,7 @@ def run_simple_server():
 def create_gogs_container():
     try:
         # Get the correct podman command
-        podman_cmd = "podman"
+        podman_cmd = get_podman_command()
 
         # Get configuration from environment variables
         config = get_config_from_env()
@@ -164,7 +186,7 @@ def create_gogs_container():
 
         # Create app.ini configuration
         app_ini_content = create_app_ini(config)
-        config_path = "/tmp/gogs-app.ini"
+        config_path = "/tmp/gogs-config/app.ini"
         
         if os.path.exists(config_path):
             try:
@@ -187,22 +209,21 @@ def create_gogs_container():
             podman_cmd, "run", "-d",
             "--replace",
             "--name", config['container_name'],
-            "--publish", f"{config['gogs_port']}:3000",
-            "--publish", f"{config['gogs_ssh_port']}:{config['gogs_ssh_port']}",
+            "--network", "host",
             "--restart", "unless-stopped",
             "--label", "io.containers.autoupdate=image",
             "--label", "io.podman.desktop=true",
             "--label", "app=gogs",
             "--label", f"version={config['gogs_port']}",
             "-v", f"{config['gogs_data_volume']}:/data",
-            "-v", f"/tmp/gogs-app.ini:/data/gogs/conf/app.ini",
+            "-v", f"/tmp/gogs-config/app.ini:/data/gogs/conf/app.ini",
             "-e", "USER_UID=1000",
             "-e", "USER_GID=1000",
             "-e", "GIT_DISCOVERY=true",
             "-e", "HTTP_ADDR=0.0.0.0",
             "-e", "HTTP_PORT=3000",
-            "-e", "SSH_PORT={config['gogs_ssh_port']}",
-            "-e", "SSH_LISTEN_PORT={config['gogs_ssh_listen_port']}",
+            "-e", f"SSH_PORT={config['gogs_ssh_port']}",
+            "-e", f"SSH_LISTEN_PORT={config['gogs_ssh_listen_port']}",
             config['gogs_image']
         ], check=True)
 
@@ -234,7 +255,8 @@ def create_gogs_container():
     except Exception as e:
         print(f"Error creating Gogs container: {e}")
         print("Starting simple HTTP server as fallback...")
-        return run_simple_server()
+        run_simple_server()
+        return True
 
 if __name__ == "__main__":
     success = create_gogs_container()

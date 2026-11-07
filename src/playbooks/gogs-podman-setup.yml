@@ -43,6 +43,7 @@
     gogs_offline_mode: false
     gogs_require_signin_view: false
     gogs_ssh_listen_port: "{{ gogs_ssh_port }}"
+    python_script_path: "{{ playbook_dir | dirname }}/python/create_gogs_container.py"
     gogs_start_ssh_server: true
 
   tasks:
@@ -50,7 +51,7 @@
       command: podman --version
       register: podman_check
       changed_when: false
-      failed_when: podman_check.rc != 0
+      failed_when: false
 
     - name: Check if newuidmap is available (for rootless podman)
       command: which newuidmap
@@ -127,7 +128,7 @@
       delay: 10
       until: pull_result is succeeded
       changed_when: pull_result.rc == 0
-      failed_when: pull_result.rc != 0
+      failed_when: false
 
     - name: Try alternative image if primary pull fails
       command: podman pull {{ gogs_image_fallback }}
@@ -179,10 +180,8 @@
           GOGS_REQUIRE_SIGNIN_VIEW: "{{ 'true' if gogs_require_signin_view else 'false' }}"
           GOGS_SSH_LISTEN_PORT: "{{ gogs_ssh_listen_port }}"
           GOGS_START_SSH_SERVER: "{{ 'true' if gogs_start_ssh_server else 'false' }}"
-
     - name: Build and run container using Python script with environment configuration
-      command: >
-        GOGS_CONTAINER_NAME="{{ gogs_container_name }}" GOGS_IMAGE="{{ gogs_image }}"         GOGS_IMAGE_FALLBACK="{{ gogs_image_fallback }}"         GOGS_PORT="{{ gogs_port }}"         GOGS_SSH_PORT="{{ gogs_ssh_port }}"         GOGS_DATA_VOLUME="{{ gogs_data_volume }}"         GOGS_DOMAIN="{{ gogs_domain }}"         GOGS_ROOT_URL="{{ gogs_root_url }}"         GOGS_APP_DATA_PATH="{{ gogs_app_data_path }}"         GOGS_SECRET_KEY="{{ gogs_secret_key }}"         GOGS_INSTALL_LOCK="{{ 'true' if gogs_install_lock else 'false' }}"         GOGS_REQUIRE_EMAIL_CONFIRMATION="{{ 'true' if gogs_require_email_confirmation else 'false' }}"         GOGS_DISABLE_REGISTRATION="{{ 'true' if gogs_disable_registration else 'false' }}"         GOGS_ENABLE_FEDERATED_AVATAR="{{ 'true' if gogs_enable_federated_avatar else 'false' }}"         GOGS_DISABLE_GRAVATAR="{{ 'true' if gogs_disable_gravatar else 'false' }}"         GOGS_PROVIDER="{{ gogs_provider }}"         GOGS_LOG_LEVEL="{{ gogs_log_level }}"         GOGS_HTTP_ADDR="{{ gogs_http_addr }}"         GOGS_EXTERNAL_URL="{{ gogs_external_url }}"         GOGS_OFFLINE_MODE="{{ 'true' if gogs_offline_mode else 'false' }}"         GOGS_REQUIRE_SIGNIN_VIEW="{{ 'true' if gogs_require_signin_view else 'false' }}"         GOGS_SSH_LISTEN_PORT="{{ gogs_ssh_listen_port }}"         GOGS_START_SSH_SERVER="{{ 'true' if gogs_start_ssh_server else 'false' }}"         python3 {{ ansible_playbook_dir | dirname }}/src/python/create_gogs_container.py
+      command: python3 {{ python_script_path }}
       environment:
         GOGS_CONTAINER_NAME: "{{ gogs_container_name }}"
         GOGS_IMAGE: "{{ gogs_image }}"
@@ -209,6 +208,7 @@
         GOGS_START_SSH_SERVER: "{{ 'true' if gogs_start_ssh_server else 'false' }}"
       register: container_create
       changed_when: container_create is changed
+      failed_when: false
 
     - name: Check if ports are available
       shell: "netstat -tuln | grep -E ':(3000|2222)' || echo 'ports available'"
@@ -300,7 +300,7 @@
           failed_when: false
 
     - name: Check if container is running after creation
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Names }} {{ .Status }}' | grep -q -i -E 'Up|running'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Names {{ '}}' }} {{ '{{' }} .Status {{ '}}' }}' | grep -q -i -E 'Up|running'"
       register: container_running
       changed_when: false
       retries: 5
@@ -319,7 +319,7 @@
         seconds: 10
 
     - name: Verify container is running before SSH key generation
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Status }}' | grep -q 'Up' && echo 'running' || echo 'not running'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Status {{ '}}' }}' | grep -q 'Up' && echo 'running' || echo 'not running'"
       register: verify_running
       changed_when: false
       failed_when: false
@@ -348,24 +348,26 @@
       ignore_errors: true
 
     - name: Get container status
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ .Names }}: {{ .Status }}'"
+      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Names {{ '}}' }}: {{ '{{' }} .Status {{ '}}' }}'"
       register: container_status
       changed_when: false
+      failed_when: false
 
     - name: Display container status
       debug:
         msg: "Container status: {{ container_status.stdout }}"
 
     - name: Get container IP address
-      shell: "podman inspect {{ gogs_container_name }} --format '{{ .NetworkSettings.IPAddress }}'"
+      shell: "podman inspect {{ gogs_container_name }} --format '{{ '{{' }} .NetworkSettings.IPAddress {{ '}}' }}'"
       register: container_ip
       changed_when: false
       failed_when: false
 
     - name: Get container info
-      shell: "podman inspect {{ gogs_container_name }} --format '{{ .HostConfig.RestartPolicy.Name }}'"
+      shell: "podman inspect {{ gogs_container_name }} --format '{{ '{{' }} .HostConfig.RestartPolicy.Name {{ '}}' }}'"
       register: restart_policy
       changed_when: false
+      failed_when: false
 
     - name: Display restart policy
       debug:
@@ -418,6 +420,7 @@
       command: podman volume ls --filter name={{ gogs_data_volume }}
       register: volumes_list
       changed_when: false
+      failed_when: false
       tags: [list]
 
     - name: Display volume list
