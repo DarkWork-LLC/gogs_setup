@@ -60,7 +60,7 @@ class TestRunSimpleServer:
 
         # Check that the URL is printed
         url_printed = any(
-            "http://localhost:3000" in str(call_args) for call_args in mock_print.call_args_list
+            "http://mofo-tank:3000" in str(call_args) for call_args in mock_print.call_args_list
         )
         assert url_printed, "Access URL should be printed"
 

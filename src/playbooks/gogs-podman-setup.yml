@@ -27,8 +27,8 @@
     gogs_data_volume: gogs_data
     
     # App configuration
-    gogs_domain: localhost
-    gogs_root_url: http://localhost:{{ gogs_port }}/
+    gogs_domain: "{{ ansible_hostname }}"
+    gogs_root_url: http://{{ ansible_hostname }}:{{ gogs_port }}/
     gogs_app_data_path: /data/gogs
     gogs_secret_key: GOGS_SECRET_KEY_7x3fL9p2mN4vR8yT5wK0qZ1xJ3cB6nG
     gogs_install_lock: false
@@ -39,7 +39,7 @@
     gogs_provider: file
     gogs_log_level: Info
     gogs_http_addr: 0.0.0.0
-    gogs_external_url: http://127.0.0.1:{{ gogs_port }}/
+    gogs_external_url: http://{{ ansible_hostname }}:{{ gogs_port }}/
     gogs_offline_mode: false
     gogs_require_signin_view: false
     gogs_ssh_listen_port: "{{ gogs_ssh_port }}"
@@ -143,9 +143,9 @@
         mode: '0755'
 
     - name: Remove stale app.ini if exists
-      file:
-        path: /tmp/gogs-app.ini
-        state: absent
+      shell: rm -f /tmp/gogs-app.ini || true
+      changed_when: false
+      failed_when: false
 
     - name: Create Gogs configuration directory
       file:
@@ -356,13 +356,13 @@
         msg: "Container status: {{ container_status.stdout }}"
 
     - name: Get container IP address
-      shell: "podman inspect {{ gogs_container_name }} --format '{{ .NetworkSettings.IPAddress }}'"
+      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .NetworkSettings.IPAddress }}{% endraw %}'"
       register: container_ip
       changed_when: false
       failed_when: false
 
     - name: Get container info
-      shell: "podman inspect {{ gogs_container_name }} --format '{{ .HostConfig.RestartPolicy.Name }}'"
+      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .HostConfig.RestartPolicy.Name }}{% endraw %}'"
       register: restart_policy
       changed_when: false
 

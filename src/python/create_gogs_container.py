@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 import time
+import socket
 
 def get_podman_command():
     """Get the correct podman command to use"""
@@ -33,8 +34,8 @@ def get_config_from_env():
     gogs_data_volume = os.environ.get('GOGS_DATA_VOLUME', 'gogs_data')
     
     # App configuration (from Ansible or environment)
-    gogs_domain = os.environ.get('GOGS_DOMAIN', 'localhost')
-    gogs_root_url = os.environ.get('GOGS_ROOT_URL', f'http://localhost:{gogs_port}/')
+    gogs_domain = os.environ.get('GOGS_DOMAIN', socket.gethostname())
+    gogs_root_url = os.environ.get('GOGS_ROOT_URL', f'http://{socket.gethostname()}:{gogs_port}/')
     gogs_app_data_path = os.environ.get('GOGS_APP_DATA_PATH', '/data/gogs')
     gogs_secret_key = os.environ.get('GOGS_SECRET_KEY', 'gogs-secret-key-7x3fL9p2mN4vR8yT5wK0qZ1xJ3cB6nG')
     gogs_install_lock = os.environ.get('GOGS_INSTALL_LOCK', 'false').lower() == 'true'
@@ -45,7 +46,7 @@ def get_config_from_env():
     gogs_provider = os.environ.get('GOGS_PROVIDER', 'file')
     gogs_log_level = os.environ.get('GOGS_LOG_LEVEL', 'Info')
     gogs_http_addr = os.environ.get('GOGS_HTTP_ADDR', '0.0.0.0')
-    gogs_external_url = os.environ.get('GOGS_EXTERNAL_URL', f'http://127.0.0.1:{gogs_port}/')
+    gogs_external_url = os.environ.get('GOGS_EXTERNAL_URL', f'http://{socket.gethostname()}:{gogs_port}/')
     gogs_offline_mode = os.environ.get('GOGS_OFFLINE_MODE', 'false').lower() == 'true'
     gogs_require_signin_view = os.environ.get('GOGS_REQUIRE_SIGNIN_VIEW', 'false').lower() == 'true'
     gogs_ssh_listen_port = os.environ.get('GOGS_SSH_LISTEN_PORT', gogs_ssh_port)
@@ -186,12 +187,21 @@ def create_gogs_container():
             with os.fdopen(fd, "w") as f:
                 f.write(app_ini_content)
 
-        # Create volumes (handle case where volume already exists)
+        # Ensure the mounted config file is writable by the container user
         try:
+            os.chmod(config_path, 0o666)
+        except Exception:
+            pass
+
+        # Create or reuse persistent volume (do not wipe existing data)
+        try:
+            subprocess.run(
+                [podman_cmd, "volume", "inspect", config['gogs_data_volume']],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
             subprocess.run([podman_cmd, "volume", "create", config['gogs_data_volume']], check=True)
-        except subprocess.CalledProcessError as vol_err:
-            if vol_err.returncode != 125 and "already exists" not in str(vol_err):
-                raise vol_err
 
         # Create container
         subprocess.run([
@@ -237,8 +247,8 @@ def create_gogs_container():
         ], check=True)
 
         print("Gogs container created and started successfully!")
-        print(f"Access Gogs at: http://127.0.0.1:{config['gogs_port']}")
-        print(f"SSH access at: 127.0.0.1:{config['gogs_ssh_port']}")
+        print(f"Access Gogs at: http://{socket.gethostname()}:{config['gogs_port']}")
+        print(f"SSH access at: {socket.gethostname()}:{config['gogs_ssh_port']}")
 
         return True
 

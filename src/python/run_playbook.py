@@ -10,6 +10,7 @@ also unavailable, it starts a simple HTTP server for development.
 
 import http.server
 import socketserver
+import socket
 import os
 import subprocess
 import sys
@@ -90,7 +91,7 @@ def run_simple_server():
         with socketserver.TCPServer(("", 3002), handler) as httpd:
             print("\nSimple HTTP Server running on port 3002")
             print("Press Ctrl+C to stop the server")
-            print("Access Gogs at: http://localhost:3002")
+            print(f"Access Gogs at: http://{socket.gethostname()}:3002")
             try:
                 httpd.serve_forever()
             except KeyboardInterrupt:
@@ -106,14 +107,14 @@ def main():
     # Try running the Ansible playbook first
     if run_ansible_playbook():
         print("\nGogs setup complete via Ansible playbook!")
-        print("Access Gogs at: http://localhost:3000")
+        print(f"Access Gogs at: http://{socket.gethostname()}:3000")
         return True
 
     # Fall back to Python-based container creation
     print("\nTrying Python-based container creation...")
     if run_python_container_creation():
         print("\nGogs setup complete via Python script!")
-        print("Access Gogs at: http://localhost:3000")
+        print(f"Access Gogs at: http://{socket.gethostname()}:3000")
         return True
 
     # Last resort: simple HTTP server for development

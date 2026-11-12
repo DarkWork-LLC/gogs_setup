@@ -20,7 +20,7 @@ def run_simple_server():
                 with socketserver.TCPServer(("", PORT), Handler) as httpd:
                     print(f"\nSimple HTTP Server running on port {PORT}")
                     print("Press Ctrl+C to stop the server")
-                    print(f"Access Gogs at: http://localhost:{PORT}")
+                    print(f"Access Gogs at: http://{socket.gethostname()}:{PORT}")
                     print("\nNote: This is a simple server for testing purposes only.")
                     print("For a production setup with podman, install podman and try again.")
                     print("You can try: sudo apt-get install podman (Ubuntu/Debian)")
