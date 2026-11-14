@@ -6,7 +6,9 @@ fallback script used when podman is not available.
 
 import os
 import sys
-from unittest.mock import patch
+import socket
+import runpy
+from unittest.mock import patch, MagicMock
 from http.server import SimpleHTTPRequestHandler
 
 # Ensure src/python is on the path
@@ -78,6 +80,60 @@ class TestRunSimpleServer:
             "3000" in str(call_args) for call_args in mock_print.call_args_list
         )
         assert port_printed, "Port number should be printed"
+
+    @patch("simple_gogs_server.socketserver.TCPServer")
+    @patch("builtins.print")
+    def test_serve_forever_exception_continues(self, mock_print, mock_tcp_server):
+        """Test that serve_forever raising exception continues to next port."""
+        # First port: serve_forever raises generic exception
+        mock_ctx1 = MagicMock()
+        mock_ctx1.__enter__.return_value.serve_forever.side_effect = Exception("server error")
+
+        # Second port: serve_forever raises KeyboardInterrupt
+        mock_ctx2 = MagicMock()
+        mock_ctx2.__enter__.return_value.serve_forever.side_effect = KeyboardInterrupt
+
+        mock_tcp_server.side_effect = [mock_ctx1, mock_ctx2]
+
+        result = run_simple_server()
+
+        assert result is True
+        assert mock_tcp_server.call_count >= 2
+
+    @patch("simple_gogs_server.socketserver.TCPServer")
+    @patch("builtins.print")
+    def test_socket_error_address_in_use(self, mock_print, mock_tcp_server):
+        """Test that socket.error with errno 98 continues to next port."""
+        err = OSError()
+        err.errno = 98
+        mock_tcp_server.side_effect = err
+
+        result = run_simple_server()
+
+        assert result is False  # All ports fail with errno 98
+
+    @patch("simple_gogs_server.socketserver.TCPServer")
+    @patch("builtins.print")
+    def test_all_ports_busy(self, mock_print, mock_tcp_server):
+        """Test that when all ports are busy, returns False."""
+        err = OSError()
+        err.errno = 98
+        mock_tcp_server.side_effect = err
+
+        result = run_simple_server()
+
+        assert result is False
+        mock_print.assert_any_call("All common ports are busy. Cannot start server.")
+
+    @patch("simple_gogs_server.socketserver.TCPServer")
+    @patch("builtins.print")
+    def test_outer_exception_handler(self, mock_print, mock_tcp_server):
+        """Test that outer exception handler catches errors."""
+        mock_tcp_server.side_effect = RuntimeError("Unexpected error")
+
+        result = run_simple_server()
+
+        assert result is False
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ fallback mechanisms used when podman or ansible are not available.
 
 import os
 import sys
+import runpy
 from unittest.mock import patch, MagicMock
 
 # Ensure src/python is on the path
@@ -75,6 +76,18 @@ class TestRunAnsiblePlaybook:
         """Test that run_ansible_playbook returns False when ansible-playbook is not found."""
         mock_exists.return_value = True
         mock_run.side_effect = FileNotFoundError("ansible-playbook not found")
+
+        result = run_playbook.run_ansible_playbook()
+
+        assert result is False
+
+    @patch("run_playbook.subprocess.run")
+    @patch("run_playbook.os.path.exists")
+    def test_returns_false_on_generic_exception(self, mock_exists, mock_run):
+        """Test that run_ansible_playbook returns False on generic exception."""
+        mock_exists.return_value = True
+        # First call (--version) succeeds, second call (run playbook) raises
+        mock_run.side_effect = [MagicMock(returncode=0), Exception("unexpected error")]
 
         result = run_playbook.run_ansible_playbook()
 
@@ -159,10 +172,47 @@ class TestRunPythonContainerCreation:
         # subprocess.run should not have been called since script is missing
         mock_run.assert_not_called()
 
+    @patch("run_playbook.subprocess.run")
+    @patch("run_playbook.os.path.exists")
+    def test_returns_false_when_container_creation_raises(self, mock_exists, mock_run):
+        """Test that run_python_container_creation returns False when create_gogs_container raises."""
+        mock_exists.return_value = True
+        mock_run.return_value = MagicMock(returncode=0)
+        mock_cgc = MagicMock()
+        mock_cgc.create_gogs_container.side_effect = Exception("creation failed")
 
-        result = run_playbook.run_python_container_creation()
+        import sys
+        old_module = sys.modules.get("create_gogs_container")
+        sys.modules["create_gogs_container"] = mock_cgc
+
+        try:
+            result = run_playbook.run_python_container_creation()
+        finally:
+            if old_module is not None:
+                sys.modules["create_gogs_container"] = old_module
+            else:
+                del sys.modules["create_gogs_container"]
 
         assert result is False
+
+
+class TestRunSimpleServerExceptions:
+    """Tests for exception handling in run_simple_server."""
+
+    @patch("run_playbook.socketserver.TCPServer")
+    @patch("builtins.print")
+    def test_server_handles_generic_exception(self, mock_print, mock_tcp_server):
+        """Test that run_simple_server handles generic exceptions from TCPServer."""
+        mock_tcp_server.side_effect = Exception("socket error")
+
+        result = run_playbook.run_simple_server()
+
+        assert result is False
+
+
+if __name__ == "__main__":
+    import pytest
+    sys.exit(pytest.main([__file__, "-v"]))
 
 
 class TestMain:
@@ -212,6 +262,15 @@ class TestMain:
         mock_python.assert_called_once()
         mock_server.assert_called_once()
         assert result is True
+
+    def test_main_block_executed(self):
+        """Test that running the module as __main__ calls sys.exit."""
+        with patch("run_playbook.sys.exit") as mock_exit, \
+             patch("run_playbook.run_ansible_playbook", return_value=False), \
+             patch("run_playbook.run_python_container_creation", return_value=False), \
+             patch("run_playbook.run_simple_server", return_value=False):
+            runpy.run_module("run_playbook", run_name="__main__")
+            mock_exit.assert_called_once_with(1)
 
 
 if __name__ == "__main__":

@@ -7,18 +7,15 @@ import os
 import sys
 import subprocess
 import time
-<<<<<<< HEAD
 import socket
-=======
 import shutil
->>>>>>> b3c655a1be73dc23445a110cb8ca2317d15b74cf
+
 
 def get_podman_command():
-<<<<<<< HEAD
     """Get the correct podman command to use.
 
     Checks common installation locations in case podman is installed
-    but not in the system PATH.
+    but not in the system PATH. Returns None if podman is not found.
     """
     podman_path = shutil.which("podman")
     if podman_path:
@@ -37,11 +34,7 @@ def get_podman_command():
         if os.path.isfile(location) and os.access(location, os.X_OK):
             return location
 
-=======
-    """Get the correct podman command to use"""
-    subprocess.run(["podman", "--version"], check=True, capture_output=True)
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
-    return "podman"
+    return None
 
 def get_env_var(name, default=None):
     """Get environment variable with optional default"""
@@ -164,18 +157,20 @@ def run_simple_server():
     so the caller can exit gracefully instead of hanging.
     """
     try:
-        print("\n" + "=" * 60)
+        print("=" * 60)
         print("WARNING: Podman is not available. Cannot create Gogs container.")
         print("=" * 60)
-        print("\nTo set up Gogs manually:")
+        print()
+        print("To set up Gogs manually:")
         print("  1. Install podman:")
         print("     Ubuntu/Debian: sudo apt-get install podman")
         print("     Fedora/RHEL:   sudo dnf install podman")
         print("     CentOS:        sudo yum install podman")
-        print("\n  2. Then run: make build")
-        print("\nAlternatively, start a simple dev server with:")
+        print("  2. Then run: make build")
+        print()
+        print("Alternatively, start a simple dev server with:")
         print("  make quick-build")
-        print("\n" + "=" * 60)
+        print("=" * 60)
         return False
 
     except Exception as e:
@@ -237,23 +232,17 @@ def create_gogs_container():
             podman_cmd, "run", "-d",
             "--replace",
             "--name", config['container_name'],
-<<<<<<< HEAD
             "--network", "host",
-=======
             "--publish", f"{config['gogs_port']}:3000",
             "--publish", "2222:22",
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
             "--restart", "unless-stopped",
             "--label", "io.containers.autoupdate=image",
             "--label", "io.podman.desktop=true",
             "--label", "app=gogs",
-            "--label", f"version={config['gogs_port']}",
+            "--label", config['gogs_port'],
             "-v", f"{config['gogs_data_volume']}:/data",
-<<<<<<< HEAD
-            "-v", f"/tmp/gogs-config/app.ini:/data/gogs/conf/app.ini",
-=======
+            "-v", "/tmp/gogs-config/app.ini:/data/gogs/conf/app.ini",
             "-v", f"{config_path}:/data/gogs/conf/app.ini",
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
             "-e", "USER_UID=1000",
             "-e", "USER_GID=1000",
             "-e", "GIT_DISCOVERY=true",
@@ -285,7 +274,8 @@ def create_gogs_container():
 
         print("Gogs container created and started successfully!")
         print(f"Access Gogs at: http://{socket.gethostname()}:{config['gogs_port']}")
-        print(f"SSH access at: {socket.gethostname()}:{config['gogs_ssh_port']}")
+        ssh_url = f"ssh://{socket.gethostname()}:{config['gogs_ssh_port']}"
+        print(f"SSH access at: {ssh_url}")
 
         return True
 

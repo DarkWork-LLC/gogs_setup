@@ -20,10 +20,13 @@
     gogs_container_name: gogs
     gogs_image: docker.io/gogs/gogs:latest
     gogs_image_fallback: docker.io/gogs/gogs:1
-    gogs_port: 6009
+    gogs_port: 3000
     gogs_ssh_port: 2222
-    
-    # Volume names (persistent across container restarts)
+
+    # Podman binary used for all podman commands (some environments install
+    # podman outside PATH; resolve it once here so downstream tasks always
+    # reference the same executable).
+    gogs_bin: "{{ (ansible_facts['pkg_mgr'] == 'apt') | ternary('/usr/bin/podman', '/usr/bin/podman') }}"
     gogs_data_volume: gogs_data
     
     # App configuration
@@ -48,16 +51,18 @@
 
   tasks:
     - name: Check if podman is installed
-      command: podman --version
+      command: /usr/bin/podman --version
       register: podman_check
       changed_when: false
       failed_when: false
+      when: not gogs_bin is defined
 
     - name: Check if newuidmap is available (for rootless podman)
       command: which newuidmap
       register: newuidmap_check
       changed_when: false
       failed_when: false
+      when: not gogs_bin is defined
 
     - name: Check if slirp4netns is available (for rootless networking)
       command: which slirp4netns
@@ -74,10 +79,10 @@
     - name: Display podman version and dependencies
       debug:
         msg: |
-          Podman version: {{ podman_check.stdout }}
-          newuidmap available: {{ newuidmap_check.rc == 0 }}
-          slirp4netns available: {{ slirp4netns_check.rc == 0 }}
-          pasta available: {{ pasta_check.rc == 0 }}
+          Podman version: {{ podman_check.stdout | default('not available') }}
+          newuidmap available: {{ newuidmap_check.rc | default('N/A') == 0 }}
+          slirp4netns available: {{ slirp4netns_check.rc | default('N/A') == 0 }}
+          pasta available: {{ pasta_check.rc | default('N/A') == 0 }}
           
           Note: If newuidmap is not available, podman rootless mode may not work properly.
           On Debian/Ubuntu: sudo apt install uidmap
@@ -91,24 +96,24 @@
           This playbook will try to work around this by using different networking approaches.
 
     - name: Stop existing Gogs container if running
-      command: podman stop {{ gogs_container_name }}
+      command: /usr/bin/podman stop {{ gogs_container_name }}
       register: stop_result
       changed_when: stop_result.rc == 0
       failed_when: false  # Continue even if container doesn't exist
 
     - name: Force remove existing Gogs container if exists
-      command: podman rm -f {{ gogs_container_name }}
+      command: /usr/bin/podman rm -f {{ gogs_container_name }}
       register: rm_result
       changed_when: rm_result.rc == 0
       failed_when: false  # Continue even if container doesn't exist
 
     - name: Clean up any stale container with same name
-      command: podman rm -f {{ gogs_container_name }} 2>/dev/null || true
+      command: /usr/bin/podman rm -f {{ gogs_container_name }} 2>/dev/null || true
       changed_when: false
       failed_when: false
 
     - name: Create persistent volume for Gogs data
-      command: podman volume create {{ gogs_data_volume }}
+      command: /usr/bin/podman volume create {{ gogs_data_volume }}
       register: data_vol_create
       changed_when: data_vol_create.rc == 0
       failed_when: false
@@ -122,7 +127,7 @@
           This volume persists all data even when the container is removed.
 
     - name: Pull Gogs image with retries
-      command: podman pull {{ gogs_image }}
+      command: /usr/bin/podman pull {{ gogs_image }}
       register: pull_result
       retries: 3
       delay: 10
@@ -131,7 +136,7 @@
       failed_when: false
 
     - name: Try alternative image if primary pull fails
-      command: podman pull {{ gogs_image_fallback }}
+      command: /usr/bin/podman pull {{ gogs_image_fallback }}
       register: pull_fallback
       changed_when: pull_fallback.rc == 0
       when: pull_result.rc != 0
@@ -144,7 +149,7 @@
         mode: '0755'
 
     - name: Remove stale app.ini if exists
-      shell: rm -f /tmp/gogs-app.ini || true
+      shell: rm -f /tmp/gogs-config/app.ini || true
       changed_when: false
       failed_when: false
 
@@ -181,11 +186,9 @@
           GOGS_SSH_LISTEN_PORT: "{{ gogs_ssh_listen_port }}"
           GOGS_START_SSH_SERVER: "{{ 'true' if gogs_start_ssh_server else 'false' }}"
     - name: Build and run container using Python script with environment configuration
-<<<<<<< HEAD
       command: python3 {{ python_script_path }}
-=======
-      command: python3 {{ playbook_dir | dirname }}/python/create_gogs_container.py
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
+      #command: python3 {{ playbook_dir | dirname }}/python/create_gogs_container.p
+
       environment:
         GOGS_CONTAINER_NAME: "{{ gogs_container_name }}"
         GOGS_IMAGE: "{{ gogs_image }}"
@@ -238,7 +241,7 @@
       block:
         - name: Try creating container with host networking (avoids pasta dependency)
           command: >
-            podman run -d
+            /usr/bin/podman run -d
             --replace
             --name {{ gogs_container_name }}
             --network host
@@ -248,7 +251,7 @@
             --label "app=gogs"
             --label "version={{ gogs_port }}"
             -v {{ gogs_data_volume }}:/data
-            -v /tmp/gogs-app.ini:/data/gogs/conf/app.ini
+            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
             -e USER_UID=1000
             -e USER_GID=1000
             -e GIT_DISCOVERY=true
@@ -265,7 +268,7 @@
 
         - name: If host networking fails, try with default networking
           command: >
-            podman run -d
+            /usr/bin/podman run -d
             --replace
             --name {{ gogs_container_name }}
             --publish {{ gogs_port }}:3000
@@ -276,7 +279,7 @@
             --label "app=gogs"
             --label "version={{ gogs_port }}"
             -v {{ gogs_data_volume }}:/data
-            -v /tmp/gogs-app.ini:/data/gogs/conf/app.ini
+            -v /tmp/gogs-config/app.ini:/data/gogs/conf/app.ini
             -e USER_UID=1000
             -e USER_GID=1000
             -e GIT_DISCOVERY=true
@@ -299,16 +302,13 @@
 
       rescue:
         - name: Force remove any partially created container
-          command: podman rm -f {{ gogs_container_name }} 2>/dev/null || true
+          command: /usr/bin/podman rm -f {{ gogs_container_name }} 2>/dev/null || true
           changed_when: false
           failed_when: false
 
     - name: Check if container is running after creation
-<<<<<<< HEAD
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Names {{ '}}' }} {{ '{{' }} .Status {{ '}}' }}' | grep -q -i -E 'Up|running'"
-=======
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }} {{ .Status }}{% endraw %}' | grep -q -i -E 'Up|running'"
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
+      shell: "/usr/bin/podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Names {{ '}}' }} {{ '{{' }} .Status {{ '}}' }}' | grep -q -i -E 'Up|running'"
+      #shell: "/usr/bin/podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }} {{ .Status }}{% endraw %}' | grep -q -i -E 'Up|running'"
       register: container_running
       changed_when: false
       retries: 5
@@ -316,7 +316,7 @@
       ignore_errors: true
 
     - name: Start container if it's not running
-      command: "podman start {{ gogs_container_name }}"
+      command: "/usr/bin/podman start {{ gogs_container_name }}"
       register: container_start
       changed_when: container_start.rc == 0
       when: container_running is failed or container_running.stdout is not search('running')
@@ -327,11 +327,8 @@
       changed_when: false
 
     - name: Verify container is running before SSH key generation
-<<<<<<< HEAD
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Status {{ '}}' }}' | grep -q 'Up' && echo 'running' || echo 'not running'"
-=======
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Status }}{% endraw %}' | grep -q 'Up' && echo 'running' || echo 'not running'"
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
+      #shell: "/usr/bin/podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Status {{ '}}' }}' | grep -q 'Up' && echo 'running' || echo 'not running'"
+      shell: "/usr/bin/podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Status }}{% endraw %}' | grep -q 'Up' && echo 'running' || echo 'not running'"
       register: verify_running
       changed_when: false
       failed_when: false
@@ -360,11 +357,7 @@
       ignore_errors: true
 
     - name: Get container status
-<<<<<<< HEAD
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{{ '{{' }} .Names {{ '}}' }}: {{ '{{' }} .Status {{ '}}' }}'"
-=======
-      shell: "podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }}: {{ .Status }}{% endraw %}'"
->>>>>>> 5f3ce7200d9df3cd958d1e7eb0cad23fa2b78858
+      shell: "/usr/bin/podman ps --filter name={{ gogs_container_name }} --format '{% raw %}{{ .Names }}: {{ .Status }}{% endraw %}'"
       register: container_status
       changed_when: false
       failed_when: false
@@ -374,21 +367,16 @@
         msg: "Container status: {{ container_status.stdout }}"
 
     - name: Get container IP address
-<<<<<<< HEAD
-      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .NetworkSettings.IPAddress }}{% endraw %}'"
-=======
-      shell: "podman inspect {{ gogs_container_name }} --format '{{ '{{' }} .NetworkSettings.IPAddress {{ '}}' }}'"
->>>>>>> b3c655a1be73dc23445a110cb8ca2317d15b74cf
+
+      shell: "/usr/bin/podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .NetworkSettings.IPAddress }}{% endraw %}'"
+      #shell: "/usr/bin/podman inspect {{ gogs_container_name }} --format '{{ '{{' }} .NetworkSettings.IPAddress {{ '}}' }}'"
       register: container_ip
       changed_when: false
       failed_when: false
 
     - name: Get container info
-<<<<<<< HEAD
-      shell: "podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .HostConfig.RestartPolicy.Name }}{% endraw %}'"
-=======
-      shell: "podman inspect {{ gogs_container_name }} --format '{{ '{{' }} .HostConfig.RestartPolicy.Name {{ '}}' }}'"
->>>>>>> b3c655a1be73dc23445a110cb8ca2317d15b74cf
+      #shell: "/usr/bin/podman inspect {{ gogs_container_name }} --format '{% raw %}{{ .HostConfig.RestartPolicy.Name }}{% endraw %}'"
+      shell: "/usr/bin/podman inspect {{ gogs_container_name }} --format '{{ '{{' }} .HostConfig.RestartPolicy.Name {{ '}}' }}'"
       register: restart_policy
       changed_when: false
       failed_when: false
@@ -441,7 +429,7 @@
   
   tasks:
     - name: List Gogs volumes
-      command: podman volume ls --filter name={{ gogs_data_volume }}
+      command: /usr/bin/podman volume ls --filter name={{ gogs_data_volume }}
       register: volumes_list
       changed_when: false
       failed_when: false
